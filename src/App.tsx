@@ -8,12 +8,18 @@ import { RoadmapView } from './components/roadmap/RoadmapView';
 import { IssuesListView } from './components/issues/IssuesListView';
 import { ReleasesView } from './components/releases/ReleasesView';
 import { ReportsView } from './components/reports/ReportsView';
+import { UsersView } from './components/users/UsersView';
 import { SettingsView } from './components/settings/SettingsView';
+import { LoginView } from './components/auth/LoginView';
 import { CreateIssueModal } from './components/modals/CreateIssueModal';
 import { IssueDetailModal } from './components/modals/IssueDetailModal';
 
 const MainLayout: React.FC = () => {
-  const { activeView } = useJira();
+  const { activeView, currentUser } = useJira();
+
+  if (!currentUser) {
+    return <LoginView />;
+  }
 
   return (
     <div className="flex flex-col h-screen w-screen overflow-hidden bg-white dark:bg-slate-950 text-slate-900 dark:text-slate-100">
@@ -27,6 +33,7 @@ const MainLayout: React.FC = () => {
           {activeView === 'issues' && <IssuesListView />}
           {activeView === 'releases' && <ReleasesView />}
           {activeView === 'reports' && <ReportsView />}
+          {activeView === 'users' && <UsersView />}
           {activeView === 'settings' && <SettingsView />}
         </main>
       </div>

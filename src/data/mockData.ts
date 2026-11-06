@@ -9,6 +9,9 @@ export const initialUsers: User[] = [
     avatar: 'PM',
     avatarColor: 'bg-indigo-600 text-white',
     role: 'product_owner',
+    department: 'Product Management',
+    status: 'active',
+    joinedDate: '2025-01-10',
   },
   {
     id: 'user-2',
@@ -18,6 +21,9 @@ export const initialUsers: User[] = [
     avatar: 'SC',
     avatarColor: 'bg-emerald-600 text-white',
     role: 'developer',
+    department: 'Backend Engineering',
+    status: 'active',
+    joinedDate: '2025-03-15',
   },
   {
     id: 'user-3',
@@ -27,6 +33,9 @@ export const initialUsers: User[] = [
     avatar: 'AR',
     avatarColor: 'bg-blue-600 text-white',
     role: 'developer',
+    department: 'Infrastructure & DevOps',
+    status: 'active',
+    joinedDate: '2025-04-01',
   },
   {
     id: 'user-4',
@@ -36,6 +45,9 @@ export const initialUsers: User[] = [
     avatar: 'ER',
     avatarColor: 'bg-purple-600 text-white',
     role: 'designer',
+    department: 'Product Design & UI/UX',
+    status: 'active',
+    joinedDate: '2025-06-20',
   },
   {
     id: 'user-5',
@@ -45,6 +57,9 @@ export const initialUsers: User[] = [
     avatar: 'KZ',
     avatarColor: 'bg-amber-600 text-white',
     role: 'qa',
+    department: 'Quality Assurance',
+    status: 'active',
+    joinedDate: '2025-08-11',
   },
   {
     id: 'user-6',
@@ -54,6 +69,9 @@ export const initialUsers: User[] = [
     avatar: 'DM',
     avatarColor: 'bg-rose-600 text-white',
     role: 'admin',
+    department: 'Engineering Leadership',
+    status: 'active',
+    joinedDate: '2024-11-01',
   },
 ];
 

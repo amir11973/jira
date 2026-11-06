@@ -30,8 +30,8 @@ export const IssuesListView: React.FC = () => {
       if (issue.projectId !== currentProject.id) return false;
 
       // Presets
-      if (activePreset === 'my' && issue.assigneeId !== currentUser.id) return false;
-      if (activePreset === 'reported' && issue.reporterId !== currentUser.id) return false;
+      if (activePreset === 'my' && issue.assigneeId !== currentUser?.id) return false;
+      if (activePreset === 'reported' && issue.reporterId !== currentUser?.id) return false;
       if (activePreset === 'bugs' && issue.type !== 'bug') return false;
       if (activePreset === 'unassigned' && issue.assigneeId) return false;
 
@@ -50,7 +50,7 @@ export const IssuesListView: React.FC = () => {
 
       return true;
     });
-  }, [issues, currentProject.id, activePreset, filterType, filterStatus, filterAssignee, filterPriority, searchFilterText, currentUser.id]);
+  }, [issues, currentProject.id, activePreset, filterType, filterStatus, filterAssignee, filterPriority, searchFilterText, currentUser?.id]);
 
   // Selected issue preview on the right
   const activeDetailIssue = issues.find(i => i.id === (selectedIssueId || filteredIssues[0]?.id));

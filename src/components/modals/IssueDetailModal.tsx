@@ -499,7 +499,11 @@ export const IssueDetailModal: React.FC = () => {
                     {t.assignee}
                   </label>
                   <button
-                    onClick={() => updateIssue(issue.id, { assigneeId: currentUser.id })}
+                    onClick={() => {
+                      if (currentUser) {
+                        updateIssue(issue.id, { assigneeId: currentUser.id });
+                      }
+                    }}
                     className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline"
                   >
                     {language === 'fa' ? 'به من اختصاص بده' : 'Assign to me'}

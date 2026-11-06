@@ -1,7 +1,6 @@
-import React from 'react';
 import { 
   Kanban, ListTodo, CalendarRange, Filter, 
-  Package, BarChart3, Settings, ChevronLeft, ChevronRight
+  Package, BarChart3, Settings, ChevronLeft, ChevronRight, Users
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { ViewType } from '../../types/jira';
@@ -9,7 +8,7 @@ import { ViewType } from '../../types/jira';
 export const Sidebar: React.FC = () => {
   const { 
     t, activeView, setActiveView, sidebarCollapsed, 
-    setSidebarCollapsed, currentProject, issues, sprints, language 
+    setSidebarCollapsed, currentProject, issues, sprints, users, language 
   } = useJira();
 
   const activeSprintIssues = issues.filter(
@@ -26,6 +25,7 @@ export const Sidebar: React.FC = () => {
     { id: 'issues', label: t.issuesAndFilters, icon: Filter },
     { id: 'releases', label: t.releases, icon: Package },
     { id: 'reports', label: t.reports, icon: BarChart3 },
+    { id: 'users', label: t.userManagement, icon: Users, count: users.length },
     { id: 'settings', label: t.projectSettings, icon: Settings },
   ];
 

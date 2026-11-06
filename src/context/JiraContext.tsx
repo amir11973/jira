@@ -30,9 +30,19 @@ interface JiraContextType {
   currentProject: Project;
   setCurrentProjectId: (id: string) => void;
 
-  // Data
+  // Users & Auth
   users: User[];
-  currentUser: User;
+  currentUser: User | null;
+  isAuthenticated: boolean;
+  login: (user: User) => void;
+  logout: () => void;
+  setCurrentUser: (user: User | null) => void;
+  createUser: (user: Omit<User, 'id'>) => User;
+  updateUser: (id: string, updates: Partial<User>) => void;
+  deleteUser: (id: string) => void;
+  toggleUserStatus: (id: string) => void;
+
+  // Data
   statuses: Status[];
   epics: Epic[];
   sprints: Sprint[];
@@ -119,8 +129,23 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return localStorage.getItem(`${STORAGE_KEY_PREFIX}cur_proj`) || initialProjects[0].id;
   });
 
-  const [users] = useState<User[]>(initialUsers);
-  const [currentUser] = useState<User>(initialUsers[0]);
+  const [users, setUsers] = useState<User[]>(() => {
+    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}users`);
+    return saved ? JSON.parse(saved) : initialUsers;
+  });
+
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}current_user`);
+    if (saved) {
+      try {
+        return JSON.parse(saved);
+      } catch (e) {
+        return initialUsers[0];
+      }
+    }
+    return initialUsers[0];
+  });
+
   const [statuses] = useState<Status[]>(initialStatuses);
 
   const [epics, setEpics] = useState<Epic[]>(() => {
@@ -189,12 +214,77 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem(`${STORAGE_KEY_PREFIX}versions`, JSON.stringify(versions));
   }, [versions]);
 
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}users`, JSON.stringify(users));
+  }, [users]);
+
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem(`${STORAGE_KEY_PREFIX}current_user`, JSON.stringify(currentUser));
+    } else {
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}current_user`);
+    }
+  }, [currentUser]);
+
   const toggleLanguage = () => {
     setLanguage(prev => prev === 'fa' ? 'en' : 'fa');
   };
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'light' ? 'dark' : 'light');
+  };
+
+  const login = (user: User) => {
+    setCurrentUser(user);
+  };
+
+  const logout = () => {
+    setCurrentUser(null);
+  };
+
+  const createUser = (data: Omit<User, 'id'>): User => {
+    const newUser: User = {
+      ...data,
+      id: `user-${Date.now()}`,
+      status: data.status || 'active',
+      joinedDate: data.joinedDate || new Date().toISOString().split('T')[0],
+    };
+    setUsers(prev => [...prev, newUser]);
+    return newUser;
+  };
+
+  const updateUser = (id: string, updates: Partial<User>) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === id) {
+        const updated = { ...u, ...updates };
+        if (currentUser?.id === id) {
+          setCurrentUser(updated);
+        }
+        return updated;
+      }
+      return u;
+    }));
+  };
+
+  const deleteUser = (id: string) => {
+    setUsers(prev => prev.filter(u => u.id !== id));
+    if (currentUser?.id === id) {
+      setCurrentUser(null);
+    }
+  };
+
+  const toggleUserStatus = (id: string) => {
+    setUsers(prev => prev.map(u => {
+      if (u.id === id) {
+        const nextStatus = u.status === 'inactive' ? 'active' : 'inactive';
+        const updated = { ...u, status: nextStatus as 'active' | 'inactive' };
+        if (currentUser?.id === id) {
+          setCurrentUser(updated);
+        }
+        return updated;
+      }
+      return u;
+    }));
   };
 
   const currentProject = projects.find(p => p.id === currentProjectId) || projects[0];
@@ -225,7 +315,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       status: data.status || (data.sprintId ? 'todo' : 'backlog'),
       priority: data.priority || 'medium',
       assigneeId: data.assigneeId || null,
-      reporterId: currentUser.id,
+      reporterId: currentUser?.id || users[0]?.id || 'user-1',
       storyPoints: data.storyPoints ?? 3,
       originalEstimateMinutes: data.originalEstimateMinutes ?? 240,
       remainingEstimateMinutes: data.remainingEstimateMinutes ?? 240,
@@ -356,7 +446,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (issue.id === issueId) {
         const newComment = {
           id: `c-${Date.now()}`,
-          authorId: currentUser.id,
+          authorId: currentUser?.id || users[0]?.id || 'user-1',
           content,
           createdAt: new Date().toISOString()
         };
@@ -376,7 +466,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (issue.id === issueId) {
         const newWorklog = {
           id: `w-${Date.now()}`,
-          authorId: currentUser.id,
+          authorId: currentUser?.id || users[0]?.id || 'user-1',
           timeSpentMinutes: minutes,
           startedAt: new Date().toISOString(),
           comment
@@ -523,10 +613,14 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSprints(initialSprints);
     setEpics(initialEpics);
     setVersions(initialVersions);
+    setUsers(initialUsers);
+    setCurrentUser(initialUsers[0]);
     localStorage.removeItem(`${STORAGE_KEY_PREFIX}issues`);
     localStorage.removeItem(`${STORAGE_KEY_PREFIX}sprints`);
     localStorage.removeItem(`${STORAGE_KEY_PREFIX}epics`);
     localStorage.removeItem(`${STORAGE_KEY_PREFIX}versions`);
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}users`);
+    localStorage.removeItem(`${STORAGE_KEY_PREFIX}current_user`);
   };
 
   return (
@@ -551,6 +645,14 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         users,
         currentUser,
+        isAuthenticated: Boolean(currentUser),
+        login,
+        logout,
+        setCurrentUser,
+        createUser,
+        updateUser,
+        deleteUser,
+        toggleUserStatus,
         statuses,
         epics,
         sprints,

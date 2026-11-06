@@ -36,7 +36,7 @@ export const BoardView: React.FC = () => {
     }
 
     // Quick filter
-    if (quickFilter === 'my' && issue.assigneeId !== currentUser.id) return false;
+    if (quickFilter === 'my' && issue.assigneeId !== currentUser?.id) return false;
     if (quickFilter === 'bugs' && issue.type !== 'bug') return false;
     if (quickFilter === 'high' && issue.priority !== 'high' && issue.priority !== 'highest') return false;
     if (quickFilter === 'recent') {

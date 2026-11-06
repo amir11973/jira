@@ -10,6 +10,9 @@ export interface User {
   avatar: string;
   avatarColor: string;
   role: 'admin' | 'developer' | 'qa' | 'product_owner' | 'designer';
+  department?: string;
+  status?: 'active' | 'inactive';
+  joinedDate?: string;
 }
 
 export interface Status {
@@ -129,4 +132,5 @@ export type ViewType =
   | 'issues' 
   | 'releases' 
   | 'reports' 
+  | 'users'
   | 'settings';
