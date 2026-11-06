@@ -1,0 +1,6 @@
+{
+  "name": "JiraFlow - Enterprise Agile Project Management",
+  "description": "Comprehensive enterprise Agile project management platform inspired by Jira, featuring Scrum & Kanban boards, Backlog & Sprint planning, Roadmaps, Issue tracking, Time logging, and Agile reports.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

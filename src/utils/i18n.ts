@@ -1,0 +1,367 @@
+export type Language = 'fa' | 'en';
+
+export const translations = {
+  en: {
+    // Nav
+    appName: 'JiraFlow',
+    projects: 'Projects',
+    board: 'Board',
+    backlog: 'Backlog',
+    roadmap: 'Timeline / Roadmap',
+    issuesAndFilters: 'Issues & JQL',
+    releases: 'Releases',
+    reports: 'Reports',
+    projectSettings: 'Project Settings',
+    createIssue: 'Create Issue',
+    searchPlaceholder: 'Search issues, keys, or summary (Press /)',
+    
+    // Project info
+    softwareProject: 'Software Project',
+    lead: 'Lead',
+    switchProject: 'Switch Project',
+    
+    // Board
+    activeSprint: 'Active Sprint',
+    completeSprint: 'Complete Sprint',
+    startSprint: 'Start Sprint',
+    quickFilters: 'Quick Filters',
+    allIssues: 'All Issues',
+    onlyMyIssues: 'Only My Issues',
+    recentlyUpdated: 'Recently Updated',
+    bugsOnly: 'Bugs Only',
+    highPriority: 'High Priority',
+    groupBy: 'Group by',
+    none: 'None',
+    assignee: 'Assignee',
+    epic: 'Epic',
+    noActiveSprint: 'No active sprint',
+    noActiveSprintDesc: 'Go to Backlog to plan and start a sprint for this project.',
+    goToBacklog: 'Go to Backlog',
+    
+    // Statuses
+    todo: 'TO DO',
+    inprogress: 'IN PROGRESS',
+    review: 'CODE REVIEW',
+    done: 'DONE',
+    backlogStatus: 'BACKLOG',
+
+    // Issue Types
+    epicType: 'Epic',
+    storyType: 'Story',
+    taskType: 'Task',
+    bugType: 'Bug',
+    subtaskType: 'Sub-task',
+
+    // Priorities
+    highest: 'Highest',
+    high: 'High',
+    medium: 'Medium',
+    low: 'Low',
+    lowest: 'Lowest',
+
+    // Issue Details
+    summary: 'Summary',
+    description: 'Description',
+    status: 'Status',
+    reporter: 'Reporter',
+    storyPoints: 'Story Points',
+    priority: 'Priority',
+    fixVersions: 'Fix Versions',
+    components: 'Components',
+    labels: 'Labels',
+    timeTracking: 'Time Tracking',
+    originalEstimate: 'Original Estimate',
+    remaining: 'Remaining',
+    logged: 'Logged',
+    logWork: 'Log Work',
+    subtasks: 'Subtasks',
+    addSubtask: 'Add Subtask',
+    linkedIssues: 'Linked Issues',
+    linkIssue: 'Link Issue',
+    activity: 'Activity',
+    comments: 'Comments',
+    worklogs: 'Worklogs',
+    history: 'History',
+    addComment: 'Add a comment...',
+    save: 'Save',
+    cancel: 'Cancel',
+    delete: 'Delete',
+    edit: 'Edit',
+    close: 'Close',
+    actions: 'Actions',
+    cloneIssue: 'Clone',
+    timeSpent: 'Time Spent',
+    startedAt: 'Date Started',
+    workDescription: 'Work Description',
+
+    // Backlog View
+    sprint: 'Sprint',
+    createSprint: 'Create Sprint',
+    productBacklog: 'Backlog',
+    epics: 'Epics',
+    createEpic: 'Create Epic',
+    issuesCount: 'issues',
+    pointsCount: 'pts',
+    sprintGoal: 'Sprint Goal',
+    dates: 'Dates',
+    planned: 'Planned',
+    active: 'Active',
+    completed: 'Completed',
+    moveToSprint: 'Move to Sprint',
+    moveToBacklog: 'Move to Backlog',
+    dragOrMove: 'Click or drag issues into this sprint',
+
+    // Roadmap View
+    roadmapTitle: 'Roadmap & Epic Timeline',
+    roadmapSubtitle: 'Visualize and plan high-level work across quarters and months.',
+    addEpicOnTimeline: 'Add Epic',
+    zoomWeeks: 'Weeks',
+    zoomMonths: 'Months',
+    zoomQuarters: 'Quarters',
+    epicProgress: 'Progress',
+    noEpicsFound: 'No epics created yet for this project.',
+
+    // JQL & Search View
+    searchAndFilters: 'Issues & Filters',
+    jqlMode: 'JQL Mode',
+    basicMode: 'Basic Search',
+    runJql: 'Run Query',
+    presets: 'Saved Filters',
+    myOpenIssues: 'My Open Issues',
+    reportedByMe: 'Reported by Me',
+    criticalBugs: 'Critical Bugs',
+    unassignedIssues: 'Unassigned Issues',
+    doneThisWeek: 'Done Recently',
+    exportJson: 'Export JSON',
+    exportCsv: 'Export CSV',
+    totalFound: 'Issues Found',
+    noMatchingIssues: 'No issues match your current query.',
+
+    // Releases View
+    releasesTitle: 'Releases & Versions',
+    createNewVersion: 'Create Version',
+    versionName: 'Version Name',
+    releaseDate: 'Release Date',
+    releaseVersion: 'Release',
+    unreleaseVersion: 'Unrelease',
+    released: 'Released',
+    unreleased: 'Unreleased',
+    progress: 'Progress',
+
+    // Reports View
+    reportsTitle: 'Agile Reports',
+    burndownChart: 'Sprint Burndown Chart',
+    velocityChart: 'Velocity Chart',
+    cfdChart: 'Cumulative Flow Diagram',
+    typeBreakdown: 'Issue Types Breakdown',
+    priorityBreakdown: 'Priority Distribution',
+    idealGuideline: 'Guideline (Ideal)',
+    actualRemaining: 'Actual Remaining Points',
+    committedPoints: 'Committed Points',
+    completedPoints: 'Completed Points',
+
+    // Settings
+    settingsTitle: 'Project Settings',
+    projectDetails: 'Project Details',
+    projectName: 'Project Name',
+    projectKey: 'Project Key',
+    projectLead: 'Project Lead',
+    membersAndRoles: 'Team Members & Roles',
+    workflowStatuses: 'Workflow & Columns',
+    resetDemoData: 'Reset Demo Data',
+    dataResetSuccess: 'Demo data has been restored to factory state.',
+
+    // General
+    confirmDelete: 'Are you sure you want to delete this issue?',
+    points: 'points',
+    hours: 'h',
+    minutes: 'm',
+  },
+  fa: {
+    // Nav
+    appName: 'جیرا فلو',
+    projects: 'پروژه‌ها',
+    board: 'تخته کار (Board)',
+    backlog: 'بک‌لاگ و اسپرینت‌ها',
+    roadmap: 'نقشه راه و زمان‌بندی',
+    issuesAndFilters: 'جستجو، فیلترها و JQL',
+    releases: 'نسخه‌ها و انتشار (Releases)',
+    reports: 'گزارش‌های چابک (Reports)',
+    projectSettings: 'تنظیمات پروژه',
+    createIssue: 'ایجاد تسک جدید',
+    searchPlaceholder: 'جستجوی تسک‌ها، کلید یا عنوان (کلید /)',
+    
+    // Project info
+    softwareProject: 'پروژه نرم‌افزاری',
+    lead: 'مدیر پروژه',
+    switchProject: 'تغییر پروژه',
+    
+    // Board
+    activeSprint: 'اسپرینت فعال',
+    completeSprint: 'پایان اسپرینت',
+    startSprint: 'شروع اسپرینت',
+    quickFilters: 'فیلترهای سریع',
+    allIssues: 'همه موارد',
+    onlyMyIssues: 'تسک‌های من',
+    recentlyUpdated: 'اخیراً به‌روز شده',
+    bugsOnly: 'فقط باگ‌ها',
+    highPriority: 'اولویت بالا',
+    groupBy: 'گروه‌بندی بر اساس',
+    none: 'بدون دسته‌بندی',
+    assignee: 'مسئول انجام',
+    epic: 'اپیک (Epic)',
+    noActiveSprint: 'هیچ اسپرینت فعالی وجود ندارد',
+    noActiveSprintDesc: 'برای برنامه‌ریزی و فعال‌سازی اسپرینت به بخش بک‌لاگ بروید.',
+    goToBacklog: 'رفتن به بک‌لاگ',
+    
+    // Statuses
+    todo: 'برای انجام',
+    inprogress: 'در حال انجام',
+    review: 'بررسی کد',
+    done: 'تکمیل شد',
+    backlogStatus: 'بک‌لاگ',
+
+    // Issue Types
+    epicType: 'اپیک (Epic)',
+    storyType: 'داستان کاربر (Story)',
+    taskType: 'وظیفه (Task)',
+    bugType: 'باگ (Bug)',
+    subtaskType: 'زیر وظیفه (Sub-task)',
+
+    // Priorities
+    highest: 'بسیار بالا (Highest)',
+    high: 'بالا (High)',
+    medium: 'متوسط (Medium)',
+    low: 'پایین (Low)',
+    lowest: 'بسیار پایین (Lowest)',
+
+    // Issue Details
+    summary: 'عنوان خلاصه',
+    description: 'شرح توضیحات',
+    status: 'وضعیت',
+    reporter: 'گزارش‌دهنده',
+    storyPoints: 'امتیاز تخمین (Story Points)',
+    priority: 'اولویت',
+    fixVersions: 'نسخه‌های انتشار',
+    components: 'ماژول‌ها و کامپوننت‌ها',
+    labels: 'برچسب‌ها (Labels)',
+    timeTracking: 'ثبت و ردیابی زمان کار',
+    originalEstimate: 'تخمین اولیه',
+    remaining: 'زمان باقیمانده',
+    logged: 'ثبت شده',
+    logWork: 'ثبت کارکرد (Log Work)',
+    subtasks: 'زیر وظایف (Subtasks)',
+    addSubtask: 'افزودن زیروظیفه',
+    linkedIssues: 'تسک‌های وابسته',
+    linkIssue: 'اتصال تسک',
+    activity: 'فعالیت‌ها',
+    comments: 'دیدگاه‌ها',
+    worklogs: 'لاگ‌های زمانی',
+    history: 'تاریخچه تغییرات',
+    addComment: 'افزودن دیدگاه...',
+    save: 'ذخیره',
+    cancel: 'انصراف',
+    delete: 'حذف',
+    edit: 'ویرایش',
+    close: 'بستن',
+    actions: 'عملیات',
+    cloneIssue: 'تکثیر تسک',
+    timeSpent: 'زمان صرف شده',
+    startedAt: 'تاریخ شروع',
+    workDescription: 'توضیحات کار انجام شده',
+
+    // Backlog View
+    sprint: 'اسپرینت',
+    createSprint: 'ایجاد اسپرینت',
+    productBacklog: 'بک‌لاگ محصول',
+    epics: 'اپیک‌ها (Epics)',
+    createEpic: 'ایجاد اپیک',
+    issuesCount: 'تسک',
+    pointsCount: 'امتیاز',
+    sprintGoal: 'هدف اسپرینت',
+    dates: 'بازه زمانی',
+    planned: 'برنامه‌ریزی شده',
+    active: 'در جریان',
+    completed: 'پایان یافته',
+    moveToSprint: 'انتقال به اسپرینت',
+    moveToBacklog: 'انتقال به بک‌لاگ',
+    dragOrMove: 'تسک‌ها را به این اسپرینت منتقل کنید',
+
+    // Roadmap View
+    roadmapTitle: 'نقشه راه و زمان‌بندی اپیک‌ها',
+    roadmapSubtitle: 'برنامه‌ریزی تصویری و نمای کلان اهداف محصول در طول فصول و ماه‌ها.',
+    addEpicOnTimeline: 'افزودن اپیک جدید',
+    zoomWeeks: 'هفتگی',
+    zoomMonths: 'ماهانه',
+    zoomQuarters: 'فصلی',
+    epicProgress: 'پیشرفت کار',
+    noEpicsFound: 'هنوز هیچ اپیکی برای این پروژه ایجاد نشده است.',
+
+    // JQL & Search View
+    searchAndFilters: 'جستجو، فیلترها و JQL',
+    jqlMode: 'حالت پیشرفته JQL',
+    basicMode: 'فیلتر ساده',
+    runJql: 'اجرای کوئری JQL',
+    presets: 'فیلترهای ذخیره شده',
+    myOpenIssues: 'تسک‌های باز من',
+    reportedByMe: 'گزارش شده توسط من',
+    criticalBugs: 'باگ‌های بحرانی',
+    unassignedIssues: 'تسک‌های بدون مسئول',
+    doneThisWeek: 'تکمیل شده‌های اخیر',
+    exportJson: 'خروجی JSON',
+    exportCsv: 'خروجی CSV',
+    totalFound: 'مورد یافت شد',
+    noMatchingIssues: 'هیچ تسکی با جستجوی فعلی تطابق ندارد.',
+
+    // Releases View
+    releasesTitle: 'نسخه‌ها و مدیریت انتشار (Releases)',
+    createNewVersion: 'ایجاد نسخه جدید',
+    versionName: 'نام نسخه (Version)',
+    releaseDate: 'تاریخ انتشار',
+    releaseVersion: 'انتشار نسخه',
+    unreleaseVersion: 'لغو انتشار',
+    released: 'منتشر شده',
+    unreleased: 'در حال توسعه',
+    progress: 'پیشرفت انتشار',
+
+    // Reports View
+    reportsTitle: 'گزارش‌ها و نمودارهای چابک',
+    burndownChart: 'نمودار سوختن اسپرینت (Burndown)',
+    velocityChart: 'نمودار سرعت تیم (Velocity)',
+    cfdChart: 'نمودار جریان تجمعی (CFD)',
+    typeBreakdown: 'توزیع انواع تسک‌ها',
+    priorityBreakdown: 'توزیع اولویت‌ها',
+    idealGuideline: 'خط ایده‌آل اسپرینت',
+    actualRemaining: 'امتیاز باقیمانده واقعی',
+    committedPoints: 'امتیاز تعهد شده',
+    completedPoints: 'امتیاز انجام شده',
+
+    // Settings
+    settingsTitle: 'تنظیمات و مشخصات پروژه',
+    projectDetails: 'مشخصات عمومی',
+    projectName: 'نام پروژه',
+    projectKey: 'شناسه اختصاصی (Key)',
+    projectLead: 'مدیر پروژه',
+    membersAndRoles: 'اعضای تیم و دسترسی‌ها',
+    workflowStatuses: 'ستون‌ها و گردش‌کار',
+    resetDemoData: 'بازنشانی اطلاعات نمونه',
+    dataResetSuccess: 'اطلاعات با موفقیت به حالت اولیه بازگردانی شد.',
+
+    // General
+    confirmDelete: 'آیا از حذف این تسک اطمینان دارید؟',
+    points: 'امتیاز',
+    hours: 'ساعت',
+    minutes: 'دقیقه',
+  }
+};
+
+export function formatMinutes(minutes?: number, lang: Language = 'en'): string {
+  if (!minutes || minutes <= 0) return '0m';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  const hStr = lang === 'fa' ? 'ساعت' : 'h';
+  const mStr = lang === 'fa' ? 'دقیقه' : 'm';
+  if (h > 0 && m > 0) return `${h}${hStr} ${m}${mStr}`;
+  if (h > 0) return `${h}${hStr}`;
+  return `${m}${mStr}`;
+}
