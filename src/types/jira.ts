@@ -3,6 +3,23 @@ export type Priority = 'lowest' | 'low' | 'medium' | 'high' | 'highest';
 export type StatusCategory = 'todo' | 'inprogress' | 'done';
 export type ResolutionType = 'Done' | "Won't Do" | 'Duplicate' | 'Cannot Reproduce';
 
+export type SpaceTabId =
+  | 'summary'
+  | 'list'
+  | 'board'
+  | 'development'
+  | 'forms'
+  | 'roadmap'
+  | 'docs'
+  | 'reports'
+  | 'backlog'
+  | 'calendar'
+  | 'goals'
+  | 'releases'
+  | 'archived'
+  | 'attachments'
+  | 'shortcuts';
+
 export interface User {
   id: string;
   name: string;
@@ -116,12 +133,32 @@ export interface AutomationExecution {
   executedAt: string;
 }
 
+export interface IssueAttachment {
+  id: string;
+  name: string;
+  size: string;
+  mimeType: string;
+  uploadedBy: string;
+  uploadedAt: string;
+}
+
+export interface DevLinkItem {
+  id: string;
+  type: 'pr' | 'branch' | 'commit';
+  title: string;
+  status: 'open' | 'merged' | 'deployed';
+  repo: string;
+  url: string;
+  updatedAt: string;
+}
+
 export interface Issue {
   id: string;
   key: string;
   projectId: string;
   sprintId?: string | null;
   epicId?: string | null;
+  parentIssueId?: string | null;
   type: IssueType;
   summary: string;
   description: string;
@@ -134,6 +171,9 @@ export interface Issue {
   originalEstimateMinutes?: number;
   remainingEstimateMinutes?: number;
   flagged?: boolean;
+  archived?: boolean;
+  issueColor?: string;
+  rank?: string;
   startDate?: string;
   dueDate?: string;
   team?: string;
@@ -145,6 +185,8 @@ export interface Issue {
   comments: Comment[];
   worklogs: Worklog[];
   links: IssueLink[];
+  attachments?: IssueAttachment[];
+  devLinks?: DevLinkItem[];
   history?: HistoryEntry[];
   automationExecutions?: AutomationExecution[];
   createdAt: string;
@@ -201,6 +243,28 @@ export interface NotificationSettings {
   senderName: string;
 }
 
+export interface SpaceShortcut {
+  id: string;
+  title: string;
+  url: string;
+}
+
+export interface SpaceDocPage {
+  id: string;
+  title: string;
+  content: string;
+  authorId: string;
+  updatedAt: string;
+}
+
+export interface SpacePolicy {
+  id: string;
+  title: string;
+  titleFa: string;
+  description: string;
+  enabled: boolean;
+}
+
 export interface Project {
   id: string;
   key: string;
@@ -210,7 +274,12 @@ export interface Project {
   leadId: string;
   avatarColor: string;
   category: string;
-  template?: 'scrum' | 'kanban' | 'business' | 'work_requests';
+  template?: 'scrum' | 'kanban' | 'business' | 'work_requests' | 'it_service' | 'personal';
+  starred?: boolean;
+  enabledTabs?: SpaceTabId[];
+  shortcuts?: SpaceShortcut[];
+  docs?: SpaceDocPage[];
+  policies?: SpacePolicy[];
   features?: ProjectFeatures;
   notifications?: NotificationSettings;
 }
@@ -245,6 +314,7 @@ export interface SavedFilter {
   name: string;
   jql: string;
   ownerId: string;
+  shareScope?: 'private' | 'team' | 'organization';
   createdAt: string;
 }
 
@@ -267,17 +337,149 @@ export interface FormSubmissionTemplate {
   }[];
 }
 
+export interface DashboardGadget {
+  id: string;
+  type: 'assigned_to_me' | 'issue_stats' | 'priority_breakdown' | 'created_vs_resolved' | 'activity_stream';
+  title: string;
+  titleFa: string;
+}
+
+export interface DashboardConfig {
+  id: string;
+  name: string;
+  description: string;
+  ownerId: string;
+  projectId?: string;
+  viewers: string;
+  editors: string;
+  starred?: boolean;
+  gadgets: DashboardGadget[];
+}
+
+export interface GoalItem {
+  id: string;
+  projectId: string;
+  title: string;
+  titleFa: string;
+  ownerId: string;
+  targetDate: string;
+  status: 'on_track' | 'at_risk' | 'completed';
+  linkedEpicIds: string[];
+}
+
+export interface TeamEntity {
+  id: string;
+  name: string;
+  nameFa: string;
+  description: string;
+  leadId: string;
+  memberIds: string[];
+}
+
+export interface AssetEntity {
+  id: string;
+  key: string;
+  name: string;
+  schema: 'Services' | 'Servers' | 'Databases' | 'Cloud Clusters';
+  status: 'Active' | 'Maintenance' | 'Deprecated';
+  ownerId: string;
+  environment: 'Production' | 'Staging' | 'Dev';
+  linkedIssueKeys: string[];
+}
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  titleFa: string;
+  message: string;
+  issueKey?: string;
+  createdAt: string;
+  read: boolean;
+}
+
+export interface GlobalFieldDef {
+  id: string;
+  name: string;
+  type: string;
+  locked?: boolean;
+  scope: 'System' | 'Jira Software' | 'Team-Managed' | 'Custom';
+  description: string;
+}
+
+export interface LegacyWorkflowInfo {
+  id: string;
+  name: string;
+  description: string;
+  statusesCount: number;
+  transitionsCount: number;
+  schemeType: 'Company-managed' | 'System default';
+}
+
+export interface SiteConfig {
+  siteTitle: string;
+  timezone: string;
+  defaultLanguage: 'fa' | 'en';
+  announcementBanner: string;
+  announcementEnabled: boolean;
+  emailDigestEnabled: boolean;
+  desktopAlertsEnabled: boolean;
+}
+
+export type GlobalSidebarItemKey =
+  | 'for_you'
+  | 'recent'
+  | 'starred'
+  | 'plans'
+  | 'spaces'
+  | 'filters'
+  | 'dashboards'
+  | 'assets'
+  | 'teams';
+
 export type ViewType =
+  | 'for_you'
+  | 'spaces'
+  | 'plans'
+  | 'filters'
+  | 'dashboards'
+  | 'assets'
+  | 'teams'
   | 'summary'
   | 'board'
   | 'list'
   | 'backlog'
   | 'roadmap'
+  | 'development'
   | 'forms'
+  | 'docs'
+  | 'calendar'
+  | 'goals'
   | 'issues'
   | 'releases'
   | 'reports'
+  | 'archived'
+  | 'attachments'
+  | 'shortcuts'
   | 'automation'
   | 'workflow'
   | 'users'
-  | 'settings';
+  | 'settings'
+  | 'jira_admin';
+
+export interface PlanItem {
+  id: string;
+  name: string;
+  description: string;
+  spaceIds: string[];
+  ownerId: string;
+  isDemo?: boolean;
+  createdAt: string;
+}
+
+export type QuickCreateModalType =
+  | 'none'
+  | 'create_space'
+  | 'create_plan'
+  | 'create_dashboard'
+  | 'create_team';
+

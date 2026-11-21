@@ -24,7 +24,7 @@ export const SummaryView: React.FC = () => {
     t,
   } = useJira();
 
-  const projectIssues = issues.filter(i => i.projectId === currentProject.id);
+  const projectIssues = issues.filter(i => i.projectId === currentProject.id && !i.archived);
 
   // 7-day KPI calculations (using current reference window + relative checks so demo data is informative)
   const now = Date.now();

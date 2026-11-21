@@ -24,7 +24,7 @@ export const SpaceListView: React.FC = () => {
   const [tempSummary, setTempSummary] = useState('');
 
   const projectIssues = issues.filter(i => {
-    if (i.projectId !== currentProject.id) return false;
+    if (i.projectId !== currentProject.id || i.archived) return false;
     if (filterText.trim()) {
       const q = filterText.toLowerCase();
       return i.key.toLowerCase().includes(q) || i.summary.toLowerCase().includes(q);

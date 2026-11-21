@@ -29,7 +29,7 @@ export const BacklogView: React.FC = () => {
   const projectSprints = sprints.filter(s => s.projectId === currentProject.id);
   const projectEpics = epics.filter(e => e.projectId === currentProject.id);
   const projectIssues = issues.filter(i => {
-    if (i.projectId !== currentProject.id) return false;
+    if (i.projectId !== currentProject.id || i.archived) return false;
     if (selectedEpicFilter && i.epicId !== selectedEpicFilter) return false;
     return true;
   });

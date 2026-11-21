@@ -7,8 +7,12 @@ import {
   Sprint,
   Version,
   Issue,
+  IssueType,
   ViewType,
+  SpaceTabId,
   IssueLink,
+  IssueAttachment,
+  DevLinkItem,
   WorkflowDefinition,
   WorkflowRule,
   WorkflowTransition,
@@ -21,8 +25,18 @@ import {
   ProjectFeatures,
   NotificationSettings,
   StatusCategory,
+  DashboardConfig,
+  GoalItem,
+  TeamEntity,
+  AssetEntity,
+  AppNotification,
+  SiteConfig,
+  GlobalSidebarItemKey,
+  PlanItem,
+  QuickCreateModalType,
 } from '../types/jira';
 import {
+  DEFAULT_SPACE_TABS,
   initialProjects,
   initialUsers,
   initialStatuses,
@@ -34,6 +48,12 @@ import {
   initialAutomationRules,
   initialFormTemplates,
   initialSavedFilters,
+  initialDashboards,
+  initialGoals,
+  initialTeams,
+  initialAssets,
+  initialNotifications,
+  initialSiteConfig,
 } from '../data/mockData';
 import { Language, translations } from '../utils/i18n';
 import { runTransitionPipeline } from '../utils/workflowEngine';
@@ -43,6 +63,18 @@ export interface ToastMessage {
   type: 'error' | 'success' | 'info';
   text: string;
 }
+
+const ALL_SIDEBAR_SECTIONS: GlobalSidebarItemKey[] = [
+  'for_you',
+  'recent',
+  'starred',
+  'plans',
+  'spaces',
+  'filters',
+  'dashboards',
+  'assets',
+  'teams',
+];
 
 interface JiraContextType {
   // Localization & Theme
@@ -58,24 +90,46 @@ interface JiraContextType {
   toastMessage: ToastMessage | null;
   showToast: (type: ToastMessage['type'], text: string) => void;
   clearToast: () => void;
+  appNotifications: AppNotification[];
+  markNotificationRead: (id: string) => void;
+  markAllNotificationsRead: () => void;
 
-  // Navigation
+  // Navigation & Sidebar Customization
   activeView: ViewType;
   setActiveView: (view: ViewType) => void;
   sidebarCollapsed: boolean;
   setSidebarCollapsed: (v: boolean) => void;
+  visibleSidebarSections: GlobalSidebarItemKey[];
+  toggleSidebarSection: (sec: GlobalSidebarItemKey) => void;
+  isSpaceFullscreen: boolean;
+  setIsSpaceFullscreen: (v: boolean) => void;
+  activeAdminTab: 'system' | 'work_items' | 'fields' | 'workflows' | 'automation' | 'personal';
+  setActiveAdminTab: (tab: 'system' | 'work_items' | 'fields' | 'workflows' | 'automation' | 'personal') => void;
+  pendingJqlQuery: string | null;
+  setPendingJqlQuery: (jql: string | null) => void;
+  activeQuickModal: QuickCreateModalType;
+  setActiveQuickModal: (modal: QuickCreateModalType) => void;
 
   // Projects / Spaces
   projects: Project[];
   currentProject: Project;
   setCurrentProjectId: (id: string) => void;
+  recentProjectIds: string[];
+  recentIssueIds: string[];
+  toggleStarProject: (id: string) => void;
+  toggleSpaceTab: (projectId: string, tabId: SpaceTabId) => void;
+  createSpaceDoc: (projectId: string, title: string, content: string) => void;
+  updateSpaceDoc: (projectId: string, docId: string, title: string, content: string) => void;
+  addSpaceShortcut: (projectId: string, title: string, url: string) => void;
+  removeSpaceShortcut: (projectId: string, shortcutId: string) => void;
+  toggleSpacePolicy: (projectId: string, policyId: string) => void;
   createProject: (data: {
     key: string;
     name: string;
     nameFa: string;
     description: string;
     category: string;
-    template: 'scrum' | 'kanban' | 'business' | 'work_requests';
+    template: 'scrum' | 'kanban' | 'business' | 'work_requests' | 'it_service' | 'personal';
     avatarColor: string;
   }) => Project;
   updateProject: (id: string, updates: Partial<Project>) => void;
@@ -106,6 +160,30 @@ interface JiraContextType {
   automationAuditLogs: AutomationAuditLog[];
   savedFilters: SavedFilter[];
   formTemplates: FormSubmissionTemplate[];
+  dashboards: DashboardConfig[];
+  plans: PlanItem[];
+  activePlanId: string | null;
+  setActivePlanId: (id: string | null) => void;
+  goals: GoalItem[];
+  teams: TeamEntity[];
+  assets: AssetEntity[];
+  siteConfig: SiteConfig;
+  updateSiteConfig: (updates: Partial<SiteConfig>) => void;
+
+  // Dashboards, Plans, Goals, Teams, Assets CRUD
+  createDashboard: (data: {
+    name: string;
+    description: string;
+    projectId?: string;
+    viewers?: string;
+    editors?: string;
+  }) => DashboardConfig;
+  toggleStarDashboard: (id: string) => void;
+  createPlan: (data: { name: string; description?: string; spaceIds: string[]; isDemo?: boolean }) => PlanItem;
+  createGoal: (data: Omit<GoalItem, 'id'>) => GoalItem;
+  updateGoalStatus: (id: string, status: GoalItem['status']) => void;
+  createTeam: (data: Omit<TeamEntity, 'id'>) => TeamEntity;
+  createAsset: (data: Omit<AssetEntity, 'id'>) => AssetEntity;
 
   // Workflow Actions & Navigation
   workflowViewerIssueId: string | null;
@@ -138,7 +216,8 @@ interface JiraContextType {
   isCreateModalOpen: boolean;
   setIsCreateModalOpen: (open: boolean) => void;
   createModalDefaultSprintId?: string | null;
-  openCreateModal: (defaultSprintId?: string | null) => void;
+  createModalDefaultType?: IssueType;
+  openCreateModal: (defaultSprintId?: string | null, defaultType?: IssueType) => void;
 
   // Active Sprint
   activeSprint: Sprint | undefined;
@@ -147,6 +226,10 @@ interface JiraContextType {
   createIssue: (data: Partial<Issue>) => Issue;
   updateIssue: (id: string, updates: Partial<Issue>) => void;
   deleteIssue: (id: string) => void;
+  cloneIssue: (id: string) => Issue | null;
+  toggleArchiveIssue: (id: string) => void;
+  addIssueAttachment: (issueId: string, attachment: Omit<IssueAttachment, 'id' | 'uploadedBy' | 'uploadedAt'>) => void;
+  addIssueDevLink: (issueId: string, devLink: Omit<DevLinkItem, 'id' | 'updatedAt'>) => void;
   moveIssueStatus: (id: string, newStatus: string) => { ok: boolean; error?: string };
   moveIssueSprint: (id: string, sprintId: string | null) => void;
   toggleFlagged: (id: string) => void;
@@ -167,7 +250,7 @@ interface JiraContextType {
   updateSprint: (sprintId: string, updates: Partial<Sprint>) => void;
 
   // Epics & Releases Actions
-  createEpic: (epic: Omit<Epic, 'id' | 'key' | 'projectId'>) => Epic;
+  createEpic: (epic: Omit<Epic, 'id' | 'key' | 'projectId'> & { projectId?: string }) => Epic;
   updateEpic: (id: string, updates: Partial<Epic>) => void;
   createVersion: (ver: Omit<Version, 'id' | 'projectId'>) => Version;
   toggleReleaseVersion: (versionId: string) => void;
@@ -176,7 +259,7 @@ interface JiraContextType {
   resetToDemoData: () => void;
 }
 
-const STORAGE_KEY_PREFIX = 'jiraflow_app_v2_';
+const STORAGE_KEY_PREFIX = 'jiraflow_app_v3_';
 
 const JiraContext = createContext<JiraContextType | undefined>(undefined);
 
@@ -191,18 +274,30 @@ function safeParse<T>(key: string, fallback: T): T {
 
 export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [language, setLanguage] = useState<Language>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}lang`) || localStorage.getItem('jiraflow_app_v1_lang');
+    const saved =
+      localStorage.getItem(`${STORAGE_KEY_PREFIX}lang`) ||
+      localStorage.getItem('jiraflow_app_v2_lang') ||
+      localStorage.getItem('jiraflow_app_v1_lang');
     return saved === 'fa' || saved === 'en' ? saved : 'fa';
   });
 
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}theme`) || localStorage.getItem('jiraflow_app_v1_theme');
+    const saved =
+      localStorage.getItem(`${STORAGE_KEY_PREFIX}theme`) ||
+      localStorage.getItem('jiraflow_app_v2_theme') ||
+      localStorage.getItem('jiraflow_app_v1_theme');
     if (saved === 'dark' || saved === 'light') return saved;
     return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
   });
 
   const [activeView, setActiveView] = useState<ViewType>('board');
   const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(false);
+  const [isSpaceFullscreen, setIsSpaceFullscreen] = useState<boolean>(false);
+  const [activeAdminTab, setActiveAdminTab] = useState<
+    'system' | 'work_items' | 'fields' | 'workflows' | 'automation' | 'personal'
+  >('system');
+  const [pendingJqlQuery, setPendingJqlQuery] = useState<string | null>(null);
+  const [activeQuickModal, setActiveQuickModal] = useState<QuickCreateModalType>('none');
   const [toastMessage, setToastMessage] = useState<ToastMessage | null>(null);
 
   const showToast = useCallback((type: ToastMessage['type'], text: string) => {
@@ -219,17 +314,32 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [projects, setProjects] = useState<Project[]>(() =>
     safeParse(`${STORAGE_KEY_PREFIX}projects`, initialProjects)
   );
-  const [currentProjectId, setCurrentProjectId] = useState<string>(
+  const [currentProjectId, setCurrentProjectIdState] = useState<string>(
     () => localStorage.getItem(`${STORAGE_KEY_PREFIX}cur_proj`) || initialProjects[0].id
   );
+  const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}recent_projs`, ['proj-1', 'proj-2', 'proj-4'])
+  );
+  const [recentIssueIds, setRecentIssueIds] = useState<string[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}recent_issues`, ['iss-402', 'iss-101', 'iss-103'])
+  );
+  const [visibleSidebarSections, setVisibleSidebarSections] = useState<GlobalSidebarItemKey[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}sidebar_sections`, ALL_SIDEBAR_SECTIONS)
+  );
+
+  const setCurrentProjectId = useCallback((id: string) => {
+    setCurrentProjectIdState(id);
+    setRecentProjectIds(prev => [id, ...prev.filter(x => x !== id)].slice(0, 6));
+  }, []);
+
   const [users, setUsers] = useState<User[]>(() =>
     safeParse(`${STORAGE_KEY_PREFIX}users`, initialUsers)
   );
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const savedV2 = localStorage.getItem(`${STORAGE_KEY_PREFIX}current_user`);
-    if (savedV2 !== null) {
+    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}current_user`);
+    if (saved !== null) {
       try {
-        return JSON.parse(savedV2);
+        return JSON.parse(saved);
       } catch {
         return initialUsers[0];
       }
@@ -285,15 +395,54 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const [formTemplates] = useState<FormSubmissionTemplate[]>(initialFormTemplates);
 
+  const [dashboards, setDashboards] = useState<DashboardConfig[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}dashboards`, initialDashboards)
+  );
+  const [plans, setPlans] = useState<PlanItem[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}plans`, [
+      {
+        id: 'plan-1',
+        name: 'Q4 Core & Billing Delivery Plan',
+        description: 'Unified cross-space delivery roadmap for Core Platform & Billing.',
+        spaceIds: ['proj-1', 'proj-4'],
+        ownerId: 'user-1',
+        createdAt: '2026-11-01T10:00:00Z',
+      },
+    ])
+  );
+  const [activePlanId, setActivePlanId] = useState<string | null>(null);
+  const [goals, setGoals] = useState<GoalItem[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}goals`, initialGoals)
+  );
+  const [teams, setTeams] = useState<TeamEntity[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}teams`, initialTeams)
+  );
+  const [assets, setAssets] = useState<AssetEntity[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}assets`, initialAssets)
+  );
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}notifications`, initialNotifications)
+  );
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}site_config`, initialSiteConfig)
+  );
+
   // Filter & Search
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [quickFilter, setQuickFilter] = useState<'all' | 'my' | 'recent' | 'bugs' | 'high'>('all');
   const [groupBy, setGroupBy] = useState<'none' | 'assignee' | 'epic'>('none');
 
   // Modals & Workflow Overlay Navigation
-  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const [selectedIssueId, setSelectedIssueIdState] = useState<string | null>(null);
+  const setSelectedIssueId = useCallback((id: string | null) => {
+    setSelectedIssueIdState(id);
+    if (id) {
+      setRecentIssueIds(prev => [id, ...prev.filter(x => x !== id)].slice(0, 12));
+    }
+  }, []);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState<boolean>(false);
   const [createModalDefaultSprintId, setCreateModalDefaultSprintId] = useState<string | null | undefined>(undefined);
+  const [createModalDefaultType, setCreateModalDefaultType] = useState<IssueType | undefined>(undefined);
   const [workflowViewerIssueId, setWorkflowViewerIssueId] = useState<string | null>(null);
   const [workflowReturnIssueId, setWorkflowReturnIssueId] = useState<string | null>(null);
 
@@ -316,6 +465,22 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}cur_proj`, currentProjectId);
   }, [currentProjectId]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}recent_projs`, JSON.stringify(recentProjectIds));
+  }, [recentProjectIds]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}recent_issues`, JSON.stringify(recentIssueIds));
+  }, [recentIssueIds]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}plans`, JSON.stringify(plans));
+  }, [plans]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}sidebar_sections`, JSON.stringify(visibleSidebarSections));
+  }, [visibleSidebarSections]);
 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}projects`, JSON.stringify(projects));
@@ -358,6 +523,30 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [savedFilters]);
 
   useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}dashboards`, JSON.stringify(dashboards));
+  }, [dashboards]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}goals`, JSON.stringify(goals));
+  }, [goals]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}teams`, JSON.stringify(teams));
+  }, [teams]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}assets`, JSON.stringify(assets));
+  }, [assets]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}notifications`, JSON.stringify(appNotifications));
+  }, [appNotifications]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}site_config`, JSON.stringify(siteConfig));
+  }, [siteConfig]);
+
+  useEffect(() => {
     if (currentUser) {
       localStorage.setItem(`${STORAGE_KEY_PREFIX}current_user`, JSON.stringify(currentUser));
     } else {
@@ -369,6 +558,24 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const toggleTheme = () => setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
   const login = (user: User) => setCurrentUser(user);
   const logout = () => setCurrentUser(null);
+
+  const toggleSidebarSection = (sec: GlobalSidebarItemKey) => {
+    setVisibleSidebarSections(prev =>
+      prev.includes(sec) ? prev.filter(s => s !== sec) : [...prev, sec]
+    );
+  };
+
+  const markNotificationRead = (id: string) => {
+    setAppNotifications(prev => prev.map(n => (n.id === id ? { ...n, read: true } : n)));
+  };
+
+  const markAllNotificationsRead = () => {
+    setAppNotifications(prev => prev.map(n => ({ ...n, read: true })));
+  };
+
+  const updateSiteConfig = (updates: Partial<SiteConfig>) => {
+    setSiteConfig(prev => ({ ...prev, ...updates }));
+  };
 
   const createUser = (data: Omit<User, 'id'>): User => {
     const newUser: User = {
@@ -435,12 +642,16 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     nameFa: string;
     description: string;
     category: string;
-    template: 'scrum' | 'kanban' | 'business' | 'work_requests';
+    template: 'scrum' | 'kanban' | 'business' | 'work_requests' | 'it_service' | 'personal';
     avatarColor: string;
   }): Project => {
     const cleanKey = data.key.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 6) || 'NEW';
     const newId = `proj-${Date.now()}`;
     const isScrum = data.template === 'scrum';
+    const defaultTabs: SpaceTabId[] = isScrum
+      ? [...DEFAULT_SPACE_TABS, 'backlog', 'releases']
+      : [...DEFAULT_SPACE_TABS];
+
     const newProject: Project = {
       id: newId,
       key: cleanKey,
@@ -451,11 +662,16 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       avatarColor: data.avatarColor || 'bg-blue-600',
       category: data.category || 'Software',
       template: data.template,
+      starred: false,
+      enabledTabs: defaultTabs,
+      shortcuts: [],
+      docs: [],
+      policies: [],
       features: {
         sprints: isScrum,
         estimation: isScrum || data.template === 'kanban',
         standups: true,
-        forms: data.template === 'work_requests' || true,
+        forms: true,
         releases: isScrum || data.template === 'kanban',
       },
       notifications: {
@@ -494,24 +710,107 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setProjects(prev => prev.map(p => (p.id === id ? { ...p, ...updates } : p)));
   };
 
-  const updateProjectFeatures = (id: string, features: Partial<ProjectFeatures>) => {
+  const toggleStarProject = (id: string) => {
+    setProjects(prev => prev.map(p => (p.id === id ? { ...p, starred: !p.starred } : p)));
+  };
+
+  const toggleSpaceTab = (projectId: string, tabId: SpaceTabId) => {
+    setProjects(prev =>
+      prev.map(p => {
+        if (p.id !== projectId) return p;
+        const cur = p.enabledTabs || DEFAULT_SPACE_TABS;
+        const exists = cur.includes(tabId);
+        return {
+          ...p,
+          enabledTabs: exists ? cur.filter(t => t !== tabId) : [...cur, tabId],
+        };
+      })
+    );
+  };
+
+  const createSpaceDoc = (projectId: string, title: string, content: string) => {
+    const doc = {
+      id: `doc-${Date.now()}`,
+      title,
+      content,
+      authorId: currentUser?.id || 'user-1',
+      updatedAt: new Date().toISOString(),
+    };
+    setProjects(prev =>
+      prev.map(p => (p.id === projectId ? { ...p, docs: [doc, ...(p.docs || [])] } : p))
+    );
+  };
+
+  const updateSpaceDoc = (projectId: string, docId: string, title: string, content: string) => {
     setProjects(prev =>
       prev.map(p =>
-        p.id === id
+        p.id === projectId
           ? {
               ...p,
-              features: {
-                sprints: true,
-                estimation: true,
-                standups: true,
-                forms: true,
-                releases: true,
-                ...p.features,
-                ...features,
-              },
+              docs: (p.docs || []).map(d =>
+                d.id === docId ? { ...d, title, content, updatedAt: new Date().toISOString() } : d
+              ),
             }
           : p
       )
+    );
+  };
+
+  const addSpaceShortcut = (projectId: string, title: string, url: string) => {
+    const sc = { id: `sc-${Date.now()}`, title, url };
+    setProjects(prev =>
+      prev.map(p => (p.id === projectId ? { ...p, shortcuts: [...(p.shortcuts || []), sc] } : p))
+    );
+  };
+
+  const removeSpaceShortcut = (projectId: string, shortcutId: string) => {
+    setProjects(prev =>
+      prev.map(p =>
+        p.id === projectId
+          ? { ...p, shortcuts: (p.shortcuts || []).filter(s => s.id !== shortcutId) }
+          : p
+      )
+    );
+  };
+
+  const toggleSpacePolicy = (projectId: string, policyId: string) => {
+    setProjects(prev =>
+      prev.map(p =>
+        p.id === projectId
+          ? {
+              ...p,
+              policies: (p.policies || []).map(pol =>
+                pol.id === policyId ? { ...pol, enabled: !pol.enabled } : pol
+              ),
+            }
+          : p
+      )
+    );
+  };
+
+  const updateProjectFeatures = (id: string, features: Partial<ProjectFeatures>) => {
+    setProjects(prev =>
+      prev.map(p => {
+        if (p.id !== id) return p;
+        const nextFeatures = {
+          sprints: true,
+          estimation: true,
+          standups: true,
+          forms: true,
+          releases: true,
+          ...p.features,
+          ...features,
+        };
+        let nextTabs = p.enabledTabs || [...DEFAULT_SPACE_TABS];
+        if (features.sprints === true && !nextTabs.includes('backlog')) {
+          nextTabs = [...nextTabs, 'backlog'];
+        }
+        return {
+          ...p,
+          features: nextFeatures,
+          enabledTabs: nextTabs,
+        };
+      })
     );
   };
 
@@ -536,12 +835,85 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
+  // Dashboards, Plans, Goals, Teams, Assets
+  const createDashboard = (data: {
+    name: string;
+    description: string;
+    projectId?: string;
+    viewers?: string;
+    editors?: string;
+  }): DashboardConfig => {
+    const d: DashboardConfig = {
+      id: `dash-${Date.now()}`,
+      name: data.name,
+      description: data.description,
+      ownerId: currentUser?.id || 'user-1',
+      projectId: data.projectId,
+      viewers: data.viewers || 'Private',
+      editors: data.editors || 'Private',
+      starred: false,
+      gadgets: [
+        { id: `g-${Date.now()}-1`, type: 'assigned_to_me', title: 'Assigned to Me', titleFa: 'تسک‌های من' },
+        { id: `g-${Date.now()}-2`, type: 'issue_stats', title: 'Status Breakdown', titleFa: 'آمار وضعیت‌ها' },
+      ],
+    };
+    setDashboards(prev => [d, ...prev]);
+    return d;
+  };
+
+  const createPlan = (data: {
+    name: string;
+    description?: string;
+    spaceIds: string[];
+    isDemo?: boolean;
+  }): PlanItem => {
+    const p: PlanItem = {
+      id: `plan-${Date.now()}`,
+      name: data.name,
+      description: data.description || 'Cross-space release & epic timeline plan.',
+      spaceIds: data.spaceIds.length > 0 ? data.spaceIds : projects.map(pr => pr.id),
+      ownerId: currentUser?.id || 'user-1',
+      isDemo: data.isDemo,
+      createdAt: new Date().toISOString(),
+    };
+    setPlans(prev => [p, ...prev]);
+    setActivePlanId(p.id);
+    return p;
+  };
+
+  const toggleStarDashboard = (id: string) => {
+    setDashboards(prev => prev.map(d => (d.id === id ? { ...d, starred: !d.starred } : d)));
+  };
+
+  const createGoal = (data: Omit<GoalItem, 'id'>): GoalItem => {
+    const g: GoalItem = { ...data, id: `goal-${Date.now()}` };
+    setGoals(prev => [g, ...prev]);
+    return g;
+  };
+
+  const updateGoalStatus = (id: string, status: GoalItem['status']) => {
+    setGoals(prev => prev.map(g => (g.id === id ? { ...g, status } : g)));
+  };
+
+  const createTeam = (data: Omit<TeamEntity, 'id'>): TeamEntity => {
+    const tm: TeamEntity = { ...data, id: `team-${Date.now()}` };
+    setTeams(prev => [...prev, tm]);
+    return tm;
+  };
+
+  const createAsset = (data: Omit<AssetEntity, 'id'>): AssetEntity => {
+    const ast: AssetEntity = { ...data, id: `ast-${Date.now()}` };
+    setAssets(prev => [ast, ...prev]);
+    return ast;
+  };
+
   // Workflow Editing Actions
   const addWorkflowStatus = (data: { name: string; nameFa: string; category: StatusCategory }): Status => {
-    const slug = data.name
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '_')
-      .replace(/^_|_$/g, '') || `status_${Date.now()}`;
+    const slug =
+      data.name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_|_$/g, '') || `status_${Date.now()}`;
     const colorMap: Record<StatusCategory, string> = {
       todo: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
       inprogress: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
@@ -659,6 +1031,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       name,
       jql,
       ownerId: currentUser?.id || 'user-1',
+      shareScope: 'team',
       createdAt: new Date().toISOString(),
     };
     setSavedFilters(prev => [sf, ...prev]);
@@ -669,44 +1042,94 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSavedFilters(prev => prev.filter(f => f.id !== id));
   };
 
-  const openCreateModal = (defaultSprintId?: string | null) => {
+  const openCreateModal = (defaultSprintId?: string | null, defaultType?: IssueType) => {
     setCreateModalDefaultSprintId(defaultSprintId);
+    setCreateModalDefaultType(defaultType);
     setIsCreateModalOpen(true);
+  };
+
+  // Epics
+  const createEpic = (data: Omit<Epic, 'id' | 'key' | 'projectId'> & { projectId?: string }): Epic => {
+    const targetProjectId = data.projectId || currentProject.id;
+    const targetProject = projects.find(p => p.id === targetProjectId) || currentProject;
+    const count = epics.filter(e => e.projectId === targetProjectId).length + 1;
+    const newEpic: Epic = {
+      id: `epic-${Date.now()}`,
+      key: `${targetProject.key}-EPIC-${count}`,
+      projectId: targetProjectId,
+      name: data.name,
+      nameFa: data.nameFa || data.name,
+      summary: data.summary || data.name,
+      color: data.color || '#8b5cf6',
+      status: data.status || 'inprogress',
+      startDate: data.startDate || new Date().toISOString().split('T')[0],
+      dueDate: data.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+    };
+    setEpics(prev => [...prev, newEpic]);
+    return newEpic;
+  };
+
+  const updateEpic = (id: string, updates: Partial<Epic>) => {
+    setEpics(prev => prev.map(e => (e.id === id ? { ...e, ...updates } : e)));
   };
 
   // Issue Operations
   const createIssue = (data: Partial<Issue>): Issue => {
-    const projectIssues = issues.filter(i => i.projectId === currentProject.id);
+    const targetProjId = data.projectId || currentProject.id;
+    const targetProj = projects.find(p => p.id === targetProjId) || currentProject;
+    const targetWf = workflows.find(w => w.projectId === targetProjId) || currentWorkflow;
+    const projectIssues = issues.filter(i => i.projectId === targetProjId);
     const nextNum = 101 + projectIssues.length;
-    const issueKey = `${currentProject.key}-${nextNum}`;
-    const firstStatus = currentWorkflow.statuses[0]?.id || 'todo';
+    const issueKey = `${targetProj.key}-${nextNum}`;
+    const firstStatus = targetWf.statuses[0]?.id || 'todo';
     const reporterId = currentUser?.id || users[0]?.id || 'user-1';
+    const projActiveSprint = sprints.find(s => s.projectId === targetProjId && s.status === 'active');
+
+    let linkedEpicId = data.epicId || null;
+    if (data.type === 'epic' && data.summary) {
+      const createdEpic = createEpic({
+        projectId: targetProjId,
+        name: data.summary,
+        nameFa: data.summary,
+        summary: data.description || data.summary,
+        color: data.issueColor || '#8b5cf6',
+        status: 'inprogress',
+        startDate: data.startDate || new Date().toISOString().split('T')[0],
+        dueDate: data.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+      });
+      linkedEpicId = createdEpic.id;
+    }
+
+    const resolvedAssigneeId =
+      data.assigneeId === 'AUTOMATIC' ? targetProj.leadId : data.assigneeId || null;
 
     const newIssue: Issue = {
       id: `iss-${Date.now()}`,
       key: issueKey,
-      projectId: currentProject.id,
+      projectId: targetProjId,
       sprintId:
-        currentProject.features?.sprints === false
+        targetProj.features?.sprints === false || data.type === 'epic'
           ? null
           : data.sprintId !== undefined
           ? data.sprintId
-          : activeSprint
-          ? activeSprint.id
+          : projActiveSprint
+          ? projActiveSprint.id
           : null,
-      epicId: data.epicId || null,
+      epicId: linkedEpicId,
+      parentIssueId: data.parentIssueId || null,
       type: data.type || 'story',
-      summary: data.summary || 'Untitled issue',
+      summary: data.summary || 'Untitled work item',
       description: data.description || '',
       status: data.status && data.status !== 'backlog' ? data.status : firstStatus,
       priority: data.priority || 'medium',
       resolution: null,
-      assigneeId: data.assigneeId || null,
+      assigneeId: resolvedAssigneeId,
       reporterId,
       storyPoints: data.storyPoints ?? 3,
       originalEstimateMinutes: data.originalEstimateMinutes ?? 240,
       remainingEstimateMinutes: data.remainingEstimateMinutes ?? 240,
       flagged: data.flagged ?? false,
+      archived: false,
       startDate: data.startDate,
       dueDate: data.dueDate,
       team: data.team,
@@ -718,6 +1141,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       comments: [],
       worklogs: [],
       links: [],
+      attachments: [],
+      devLinks: [],
       history: [
         {
           id: `hist-${Date.now()}`,
@@ -734,6 +1159,18 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setIssues(prev => [newIssue, ...prev]);
+    setAppNotifications(prev => [
+      {
+        id: `notif-${Date.now()}`,
+        title: `${issueKey} created`,
+        titleFa: `تسک جدید ${issueKey} ایجاد شد`,
+        message: newIssue.summary,
+        issueKey,
+        createdAt: new Date().toISOString(),
+        read: false,
+      },
+      ...prev,
+    ]);
     return newIssue;
   };
 
@@ -750,6 +1187,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
           'assigneeId',
           'resolution',
           'flagged',
+          'archived',
           'summary',
           'dueDate',
           'team',
@@ -784,6 +1222,70 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const cloneIssue = (id: string): Issue | null => {
+    const src = issues.find(i => i.id === id);
+    if (!src) return null;
+    const cloned = createIssue({
+      ...src,
+      summary: `${src.summary} (Clone)`,
+      status: 'todo',
+    });
+    linkIssue(cloned.id, src.key, 'cloners');
+    showToast('success', language === 'fa' ? `تسک با کلید ${cloned.key} تکثیر شد.` : `Cloned to ${cloned.key}`);
+    return cloned;
+  };
+
+  const toggleArchiveIssue = (id: string) => {
+    const iss = issues.find(i => i.id === id);
+    if (!iss) return;
+    const nextArchived = !iss.archived;
+    updateIssue(id, { archived: nextArchived });
+    showToast(
+      'info',
+      nextArchived
+        ? language === 'fa'
+          ? `${iss.key} به آرشیو منتقل شد.`
+          : `${iss.key} archived.`
+        : language === 'fa'
+        ? `${iss.key} از آرشیو بازیابی شد.`
+        : `${iss.key} restored from archive.`
+    );
+  };
+
+  const addIssueAttachment = (
+    issueId: string,
+    attachment: Omit<IssueAttachment, 'id' | 'uploadedBy' | 'uploadedAt'>
+  ) => {
+    const att: IssueAttachment = {
+      ...attachment,
+      id: `att-${Date.now()}`,
+      uploadedBy: currentUser?.id || 'user-1',
+      uploadedAt: new Date().toISOString(),
+    };
+    setIssues(prev =>
+      prev.map(i =>
+        i.id === issueId
+          ? { ...i, attachments: [...(i.attachments || []), att], updatedAt: new Date().toISOString() }
+          : i
+      )
+    );
+  };
+
+  const addIssueDevLink = (issueId: string, devLink: Omit<DevLinkItem, 'id' | 'updatedAt'>) => {
+    const dl: DevLinkItem = {
+      ...devLink,
+      id: `dev-${Date.now()}`,
+      updatedAt: new Date().toISOString(),
+    };
+    setIssues(prev =>
+      prev.map(i =>
+        i.id === issueId
+          ? { ...i, devLinks: [...(i.devLinks || []), dl], updatedAt: new Date().toISOString() }
+          : i
+      )
+    );
+  };
+
   const moveIssueStatus = (id: string, newStatus: string): { ok: boolean; error?: string } => {
     const issue = issues.find(i => i.id === id);
     if (!issue) return { ok: false, error: 'Issue not found' };
@@ -811,7 +1313,6 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const newAuditLogs: AutomationAuditLog[] = [];
     const executedRuleIds: string[] = [];
 
-    // Execute matching Automation Rules (Stage 6)
     const activeRules = automationRules.filter(r => r.projectId === issue.projectId && r.enabled);
     for (const rule of activeRules) {
       if (rule.trigger === 'issue_transitioned' && rule.triggerTargetStatus === newStatus) {
@@ -870,7 +1371,6 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     }
 
-    // Check Epic roll-up automation when moving a child item to Done
     if ((targetStatusObj?.category === 'done' || newStatus === 'done') && issue.epicId) {
       const closeEpicRule = activeRules.find(r => r.action === 'close_parent');
       if (closeEpicRule) {
@@ -1162,23 +1662,6 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSprints(prev => prev.map(s => (s.id === sprintId ? { ...s, ...updates } : s)));
   };
 
-  // Epics & Releases
-  const createEpic = (data: Omit<Epic, 'id' | 'key' | 'projectId'>): Epic => {
-    const count = epics.filter(e => e.projectId === currentProject.id).length + 1;
-    const newEpic: Epic = {
-      ...data,
-      id: `epic-${Date.now()}`,
-      key: `${currentProject.key}-EPIC-${count}`,
-      projectId: currentProject.id,
-    };
-    setEpics(prev => [...prev, newEpic]);
-    return newEpic;
-  };
-
-  const updateEpic = (id: string, updates: Partial<Epic>) => {
-    setEpics(prev => prev.map(e => (e.id === id ? { ...e, ...updates } : e)));
-  };
-
   const createVersion = (data: Omit<Version, 'id' | 'projectId'>): Version => {
     const newVersion: Version = {
       ...data,
@@ -1214,8 +1697,15 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUsers(initialUsers);
     setAutomationRules(initialAutomationRules);
     setSavedFilters(initialSavedFilters);
+    setDashboards(initialDashboards);
+    setGoals(initialGoals);
+    setTeams(initialTeams);
+    setAssets(initialAssets);
+    setAppNotifications(initialNotifications);
+    setSiteConfig(initialSiteConfig);
+    setVisibleSidebarSections(ALL_SIDEBAR_SECTIONS);
     setCurrentUser(initialUsers[0]);
-    setCurrentProjectId(initialProjects[0].id);
+    setCurrentProjectIdState(initialProjects[0].id);
 
     const keys = [
       'projects',
@@ -1228,6 +1718,14 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       'automation_rules',
       'automation_logs',
       'saved_filters',
+      'dashboards',
+      'goals',
+      'teams',
+      'assets',
+      'notifications',
+      'site_config',
+      'sidebar_sections',
+      'recent_projs',
       'current_user',
       'cur_proj',
     ];
@@ -1248,15 +1746,37 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         toastMessage,
         showToast,
         clearToast,
+        appNotifications,
+        markNotificationRead,
+        markAllNotificationsRead,
 
         activeView,
         setActiveView,
         sidebarCollapsed,
         setSidebarCollapsed,
+        visibleSidebarSections,
+        toggleSidebarSection,
+        isSpaceFullscreen,
+        setIsSpaceFullscreen,
+        activeAdminTab,
+        setActiveAdminTab,
+        pendingJqlQuery,
+        setPendingJqlQuery,
+        activeQuickModal,
+        setActiveQuickModal,
 
         projects,
         currentProject,
         setCurrentProjectId,
+        recentProjectIds,
+        recentIssueIds,
+        toggleStarProject,
+        toggleSpaceTab,
+        createSpaceDoc,
+        updateSpaceDoc,
+        addSpaceShortcut,
+        removeSpaceShortcut,
+        toggleSpacePolicy,
         createProject,
         updateProject,
         updateProjectFeatures,
@@ -1284,6 +1804,23 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         automationAuditLogs,
         savedFilters,
         formTemplates,
+        dashboards,
+        plans,
+        activePlanId,
+        setActivePlanId,
+        goals,
+        teams,
+        assets,
+        siteConfig,
+        updateSiteConfig,
+
+        createDashboard,
+        toggleStarDashboard,
+        createPlan,
+        createGoal,
+        updateGoalStatus,
+        createTeam,
+        createAsset,
 
         workflowViewerIssueId,
         setWorkflowViewerIssueId,
@@ -1312,6 +1849,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isCreateModalOpen,
         setIsCreateModalOpen,
         createModalDefaultSprintId,
+        createModalDefaultType,
         openCreateModal,
 
         activeSprint,
@@ -1319,6 +1857,10 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         createIssue,
         updateIssue,
         deleteIssue,
+        cloneIssue,
+        toggleArchiveIssue,
+        addIssueAttachment,
+        addIssueDevLink,
         moveIssueStatus,
         moveIssueSprint,
         toggleFlagged,
@@ -1349,10 +1891,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 };
 
-export const useJira = () => {
-  const context = useContext(JiraContext);
-  if (!context) {
-    throw new Error('useJira must be used within a JiraProvider');
-  }
-  return context;
+export const useJira = (): JiraContextType => {
+  const ctx = useContext(JiraContext);
+  if (!ctx) throw new Error('useJira must be used within JiraProvider');
+  return ctx;
 };

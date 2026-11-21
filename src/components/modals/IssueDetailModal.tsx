@@ -14,12 +14,21 @@ import {
   ChevronDown,
   ChevronUp,
   Lock,
+  Copy,
+  Archive,
+  Paperclip,
+  Code2,
+  Share2,
+  ExternalLink,
+  MoreHorizontal,
+  AlignLeft,
+  Settings,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { IssueTypeIcon, PriorityIcon, UserAvatar } from '../common/JiraIcons';
 import { formatMinutes } from '../../utils/i18n';
 import { LogWorkModal } from './LogWorkModal';
-import { IssueLink, Priority, ResolutionType } from '../../types/jira';
+import { IssueLink, IssueType, Priority, ResolutionType } from '../../types/jira';
 import { getAvailableTransitions } from '../../utils/workflowEngine';
 
 export const IssueDetailModal: React.FC = () => {
@@ -27,6 +36,7 @@ export const IssueDetailModal: React.FC = () => {
     selectedIssueId,
     setSelectedIssueId,
     issues,
+    createIssue,
     updateIssue,
     deleteIssue,
     moveIssueStatus,
@@ -37,6 +47,16 @@ export const IssueDetailModal: React.FC = () => {
     deleteSubtask,
     addComment,
     linkIssue,
+    cloneIssue,
+    toggleArchiveIssue,
+    addIssueAttachment,
+    addIssueDevLink,
+    addWorkflowStatus,
+    projects,
+    currentProject,
+    setCurrentProjectId,
+    setActiveView,
+    showToast,
     users,
     currentUser,
     epics,
@@ -60,7 +80,19 @@ export const IssueDetailModal: React.FC = () => {
   const [tempTitle, setTempTitle] = useState('');
   const [tempDesc, setTempDesc] = useState('');
   const [statusMenuOpen, setStatusMenuOpen] = useState(false);
+  const [isAddingInlineStatus, setIsAddingInlineStatus] = useState(false);
+  const [inlineStatusName, setInlineStatusName] = useState('');
+  const [attachmentName, setAttachmentName] = useState('');
+  const [isAddingAttachment, setIsAddingAttachment] = useState(false);
+  const [devPanelOpen, setDevPanelOpen] = useState(true);
   const [automationPanelOpen, setAutomationPanelOpen] = useState(false);
+  const [quickAddMenuOpen, setQuickAddMenuOpen] = useState(false);
+  const [quickMoreMenuOpen, setQuickMoreMenuOpen] = useState(false);
+  const [childItemsOpen, setChildItemsOpen] = useState(true);
+  const [isAddingChildItem, setIsAddingChildItem] = useState(false);
+  const [newChildTitle, setNewChildTitle] = useState('');
+  const [newChildType, setNewChildType] = useState<IssueType>('story');
+  const [detailsOpen, setDetailsOpen] = useState(true);
 
   const commentInputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -83,6 +115,8 @@ export const IssueDetailModal: React.FC = () => {
 
   if (!selectedIssueId || !issue) return null;
 
+  const issueProject = projects.find(p => p.id === issue.projectId) || currentProject;
+  const parentEpic = epics.find(e => e.id === issue.epicId);
   const currentSprint = sprints.find(s => s.id === issue.sprintId);
   const assigneeUser = users.find(u => u.id === issue.assigneeId);
   const reporterUser = users.find(u => u.id === issue.reporterId) || users[0];
@@ -93,6 +127,21 @@ export const IssueDetailModal: React.FC = () => {
   const origMinutes = issue.originalEstimateMinutes || 240;
   const loggedPercent = Math.min(100, Math.round((totalLoggedMinutes / origMinutes) * 100));
   const isWatching = Boolean(currentUser && (issue.watchers || []).includes(currentUser.id));
+
+  const matchedEpicObj = epics.find(
+    e => e.id === issue.epicId || e.key === issue.key || (issue.type === 'epic' && e.name === issue.summary)
+  );
+  const resolvedEpicId = issue.epicId || matchedEpicObj?.id || (issue.type === 'epic' ? issue.id : undefined);
+  const childIssues = issues.filter(
+    i =>
+      !i.archived &&
+      i.id !== issue.id &&
+      ((issue.type === 'epic' && resolvedEpicId && i.epicId === resolvedEpicId) || i.parentIssueId === issue.id)
+  );
+  const childDoneCount = childIssues.filter(c => c.status === 'done').length;
+  const childInProgCount = childIssues.filter(c => c.status === 'inprogress' || c.status === 'review').length;
+  const childDonePct = childIssues.length > 0 ? Math.round((childDoneCount / childIssues.length) * 100) : 0;
+  const childInProgPct = childIssues.length > 0 ? Math.round((childInProgCount / childIssues.length) * 100) : 0;
 
   const quickReplies =
     language === 'fa'
@@ -174,10 +223,50 @@ export const IssueDetailModal: React.FC = () => {
     <>
       <div className="fixed inset-0 z-40 bg-slate-900/50 backdrop-blur-xs flex items-center justify-center p-2 sm:p-4 overflow-y-auto">
         <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-5xl max-h-[92vh] flex flex-col overflow-hidden">
-          {/* Header */}
-          <div className="px-6 py-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between gap-4 shrink-0 bg-slate-50/50 dark:bg-slate-900">
-            <div className="flex items-center gap-3">
-              <IssueTypeIcon type={issue.type} className="w-5 h-5" />
+          {/* Header with Breadcrumbs + Clone / Archive / Flag / Watch / Delete */}
+          <div className="px-6 py-3 border-b border-slate-200 dark:border-slate-800 flex flex-wrap items-center justify-between gap-3 shrink-0 bg-slate-50/50 dark:bg-slate-900">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
+              <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
+                <button
+                  onClick={() => {
+                    setSelectedIssueId(null);
+                    setActiveView('spaces');
+                  }}
+                  className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline font-medium"
+                >
+                  {language === 'fa' ? 'فضاها' : 'Spaces'}
+                </button>
+                <span>/</span>
+                <button
+                  onClick={() => {
+                    setCurrentProjectId(issueProject.id);
+                    setSelectedIssueId(null);
+                    setActiveView('board');
+                  }}
+                  className="hover:text-blue-600 dark:hover:text-blue-400 hover:underline font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  {issueProject.key}
+                </button>
+                {parentEpic && (
+                  <>
+                    <span>/</span>
+                    <button
+                      onClick={() => {
+                        setCurrentProjectId(issueProject.id);
+                        setSelectedIssueId(null);
+                        setActiveView('roadmap');
+                      }}
+                      className="hover:underline font-semibold truncate max-w-[140px]"
+                      style={{ color: parentEpic.color }}
+                    >
+                      {parentEpic.key}
+                    </button>
+                  </>
+                )}
+                <span>/</span>
+              </div>
+
+              <IssueTypeIcon type={issue.type} className="w-4 h-4 shrink-0" />
               <span className="font-mono font-semibold text-sm text-slate-800 dark:text-slate-200">
                 {issue.key}
               </span>
@@ -192,9 +281,14 @@ export const IssueDetailModal: React.FC = () => {
                   <span>{t.flagged}</span>
                 </span>
               )}
+              {issue.archived && (
+                <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+                  ({language === 'fa' ? 'آرشیو شده' : 'Archived'})
+                </span>
+              )}
             </div>
 
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-1.5">
               <button
                 onClick={() => toggleWatcher(issue.id)}
                 className={`px-2 py-1 rounded-md text-xs font-medium flex items-center gap-1 transition-colors ${
@@ -205,7 +299,7 @@ export const IssueDetailModal: React.FC = () => {
                 title={isWatching ? t.unwatchIssue : t.watchIssue}
               >
                 <Eye className="w-3.5 h-3.5" />
-                <span className="font-mono">{(issue.watchers || []).length}</span>
+                <span className="font-mono tabular-nums">{(issue.watchers || []).length}</span>
               </button>
 
               <button
@@ -221,13 +315,47 @@ export const IssueDetailModal: React.FC = () => {
               </button>
 
               <button
+                onClick={() => {
+                  const cloned = cloneIssue(issue.id);
+                  if (cloned) setSelectedIssueId(cloned.id);
+                }}
+                title={t.cloneIssue}
+                className="p-1.5 rounded-md text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Copy className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => toggleArchiveIssue(issue.id)}
+                title={issue.archived ? t.restoreIssue : t.archiveIssue}
+                className={`p-1.5 rounded-md transition-colors ${
+                  issue.archived
+                    ? 'text-emerald-600 bg-emerald-50 dark:bg-emerald-950/40'
+                    : 'text-slate-400 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800'
+                }`}
+              >
+                <Archive className="w-4 h-4" />
+              </button>
+
+              <button
+                onClick={() => {
+                  navigator.clipboard?.writeText(`${window.location.origin}/browse/${issue.key}`).catch(() => {});
+                  showToast('info', language === 'fa' ? `لینک ${issue.key} کپی شد.` : `Copied link for ${issue.key}`);
+                }}
+                title={language === 'fa' ? 'کپی لینک' : 'Copy Link'}
+                className="p-1.5 rounded-md text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+              >
+                <Share2 className="w-4 h-4" />
+              </button>
+
+              <button
                 onClick={handleDelete}
                 title={t.delete}
                 className="p-1.5 rounded-md text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
               >
                 <Trash2 className="w-4 h-4" />
               </button>
-              <div className="h-4 w-px bg-slate-200 dark:border-slate-800" />
+              <div className="h-4 w-px bg-slate-200 dark:bg-slate-800" />
               <button
                 onClick={() => setSelectedIssueId(null)}
                 className="p-1.5 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
@@ -277,6 +405,149 @@ export const IssueDetailModal: React.FC = () => {
                     {issue.summary}
                   </h1>
                 )}
+
+                {/* Quick Action Toolbar (+ / ... / Description edit) matching Jira Cloud */}
+                <div className="flex items-center gap-1.5 mt-3 relative">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickAddMenuOpen(prev => !prev);
+                        setQuickMoreMenuOpen(false);
+                      }}
+                      title={language === 'fa' ? 'افزودن سریع' : 'Add'}
+                      className="w-8 h-8 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors"
+                    >
+                      <Plus className="w-4 h-4" />
+                    </button>
+                    {quickAddMenuOpen && (
+                      <div className="absolute top-full mt-1 start-0 w-48 bg-white dark:bg-[#282E33] border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 z-30 text-xs">
+                        {issue.type === 'epic' && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setChildItemsOpen(true);
+                              setIsAddingChildItem(true);
+                              setQuickAddMenuOpen(false);
+                            }}
+                            className="w-full px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-800 dark:text-slate-200"
+                          >
+                            <Plus className="w-3.5 h-3.5 text-purple-500" />
+                            <span>{language === 'fa' ? 'آیتم فرزند (Child work item)' : 'Child work item'}</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddingSubtask(true);
+                            setQuickAddMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-800 dark:text-slate-200"
+                        >
+                          <CheckSquare className="w-3.5 h-3.5 text-blue-500" />
+                          <span>{t.addSubtask}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsLinkIssueOpen(true);
+                            setQuickAddMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-800 dark:text-slate-200"
+                        >
+                          <Link2 className="w-3.5 h-3.5 text-emerald-500" />
+                          <span>{t.linkIssue}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setIsAddingAttachment(true);
+                            setQuickAddMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2 text-slate-800 dark:text-slate-200"
+                        >
+                          <Paperclip className="w-3.5 h-3.5 text-slate-400" />
+                          <span>{language === 'fa' ? 'پیوست فایل' : 'Attach file'}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setQuickMoreMenuOpen(prev => !prev);
+                        setQuickAddMenuOpen(false);
+                      }}
+                      title={language === 'fa' ? 'اقدامات بیشتر' : 'More actions'}
+                      className="w-8 h-8 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors"
+                    >
+                      <MoreHorizontal className="w-4 h-4" />
+                    </button>
+                    {quickMoreMenuOpen && (
+                      <div className="absolute top-full mt-1 start-0 w-44 bg-white dark:bg-[#282E33] border border-slate-200 dark:border-slate-700 rounded-lg shadow-xl py-1 z-30 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const cloned = cloneIssue(issue.id);
+                            if (cloned) setSelectedIssueId(cloned.id);
+                            setQuickMoreMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>{t.cloneIssue}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            toggleFlagged(issue.id);
+                            setQuickMoreMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <Flag className="w-3.5 h-3.5 text-amber-500" />
+                          <span>{issue.flagged ? t.unflagImpediment : t.flagImpediment}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            toggleArchiveIssue(issue.id);
+                            setQuickMoreMenuOpen(false);
+                          }}
+                          className="w-full px-3 py-2 text-start hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-2"
+                        >
+                          <Archive className="w-3.5 h-3.5" />
+                          <span>{issue.archived ? t.restoreIssue : t.archiveIssue}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setQuickMoreMenuOpen(false);
+                            handleDelete();
+                          }}
+                          className="w-full px-3 py-2 text-start hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 flex items-center gap-2"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                          <span>{t.delete}</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setTempDesc(issue.description);
+                      setIsEditingDesc(true);
+                    }}
+                    title={language === 'fa' ? 'ویرایش توضیحات' : 'Edit description'}
+                    className="w-8 h-8 rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 flex items-center justify-center transition-colors"
+                  >
+                    <AlignLeft className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
 
               {/* Description */}
@@ -324,6 +595,187 @@ export const IssueDetailModal: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {/* Child work items (Epic / Parent hierarchy table with Progress bar + Inline + Add + Inline Status dropdown) */}
+              {(issue.type === 'epic' || childIssues.length > 0) && (
+                <div className="space-y-2.5">
+                  <div className="flex items-center justify-between">
+                    <button
+                      type="button"
+                      onClick={() => setChildItemsOpen(prev => !prev)}
+                      className="flex items-center gap-1.5 text-xs font-bold text-slate-800 dark:text-slate-100"
+                    >
+                      {childItemsOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                      <span>{language === 'fa' ? 'آیتم‌های کار زیرمجموعه (Child work items)' : 'Child work items'}</span>
+                      <span className="font-mono text-[11px] text-slate-400 tabular-nums">({childIssues.length})</span>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setChildItemsOpen(true);
+                          setIsAddingChildItem(true);
+                        }}
+                        title={language === 'fa' ? 'افزودن آیتم فرزند' : 'Add child work item'}
+                        className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 hover:text-slate-900 dark:hover:text-white transition-colors"
+                      >
+                        <Plus className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+
+                  {childItemsOpen && (
+                    <div className="space-y-2.5">
+                      {/* Progress bar */}
+                      <div className="flex items-center gap-3">
+                        <div className="flex-1 h-2 bg-slate-200 dark:bg-slate-800 rounded-full overflow-hidden flex">
+                          {childDonePct > 0 && (
+                            <div
+                              className="h-full bg-emerald-500 transition-all duration-300"
+                              style={{ width: `${childDonePct}%` }}
+                            />
+                          )}
+                          {childInProgPct > 0 && (
+                            <div
+                              className="h-full bg-blue-500 transition-all duration-300"
+                              style={{ width: `${childInProgPct}%` }}
+                            />
+                          )}
+                        </div>
+                        <span className="text-[11px] font-mono tabular-nums text-slate-500 dark:text-slate-400 shrink-0">
+                          {childDonePct}% Done
+                        </span>
+                      </div>
+
+                      {/* Child table */}
+                      {childIssues.length > 0 && (
+                        <div className="border border-slate-200 dark:border-slate-700/80 rounded-lg overflow-hidden">
+                          <table className="w-full text-xs text-start border-collapse">
+                            <thead className="bg-slate-50 dark:bg-slate-800/70 text-[11px] font-semibold text-slate-500 border-b border-slate-200 dark:border-slate-700/80">
+                              <tr>
+                                <th className="py-1.5 px-2.5 text-start">{language === 'fa' ? 'کار' : 'Work'}</th>
+                                <th className="py-1.5 px-2 text-start w-20">{language === 'fa' ? 'اولویت' : 'Priority'}</th>
+                                <th className="py-1.5 px-2 text-start w-20">{language === 'fa' ? 'مسئول' : 'Assignee'}</th>
+                                <th className="py-1.5 px-2.5 text-end w-32">{t.status}</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100 dark:divide-slate-800/70">
+                              {childIssues.map(ch => {
+                                const chAssignee = users.find(u => u.id === ch.assigneeId);
+                                const chStatusObj = currentWorkflow.statuses.find(s => s.id === ch.status);
+                                const statusColor =
+                                  chStatusObj?.category === 'done' || ch.status === 'done'
+                                    ? 'bg-emerald-100 dark:bg-emerald-950/70 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700'
+                                    : chStatusObj?.category === 'inprogress' || ch.status === 'inprogress' || ch.status === 'review'
+                                    ? 'bg-blue-100 dark:bg-blue-950/70 text-blue-700 dark:text-blue-300 border-blue-300 dark:border-blue-700'
+                                    : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700';
+
+                                return (
+                                  <tr key={ch.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
+                                    <td className="py-2 px-2.5">
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedIssueId(ch.id)}
+                                        className="flex items-center gap-2 text-start min-w-0 group"
+                                      >
+                                        <IssueTypeIcon type={ch.type} className="w-3.5 h-3.5 shrink-0" />
+                                        <span className="font-mono text-blue-600 dark:text-blue-400 group-hover:underline shrink-0">
+                                          {ch.key}
+                                        </span>
+                                        <span className="text-slate-800 dark:text-slate-200 truncate max-w-[240px]">
+                                          {ch.summary}
+                                        </span>
+                                      </button>
+                                    </td>
+                                    <td className="py-2 px-2">
+                                      <div className="flex items-center gap-1 text-slate-500 capitalize">
+                                        <PriorityIcon priority={ch.priority} className="w-3.5 h-3.5" />
+                                        <span className="hidden sm:inline text-[11px]">{ch.priority}</span>
+                                      </div>
+                                    </td>
+                                    <td className="py-2 px-2">
+                                      <div className="flex items-center gap-1.5">
+                                        <UserAvatar user={chAssignee} size="sm" />
+                                      </div>
+                                    </td>
+                                    <td className="py-2 px-2.5 text-end">
+                                      <select
+                                        value={ch.status}
+                                        onChange={e => moveIssueStatus(ch.id, e.target.value)}
+                                        className={`px-2 py-0.5 rounded border text-[11px] font-bold focus:outline-none cursor-pointer ${statusColor}`}
+                                      >
+                                        {currentWorkflow.statuses.map(st => (
+                                          <option key={st.id} value={st.id}>
+                                            {language === 'fa' ? st.nameFa : st.name}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+
+                      {/* Inline + Create Child Work Item row */}
+                      {isAddingChildItem && (
+                        <form
+                          onSubmit={e => {
+                            e.preventDefault();
+                            if (!newChildTitle.trim()) return;
+                            createIssue({
+                              projectId: issue.projectId,
+                              type: newChildType,
+                              summary: newChildTitle.trim(),
+                              epicId: resolvedEpicId || null,
+                              parentIssueId: issue.id,
+                              priority: 'medium',
+                            });
+                            setNewChildTitle('');
+                            setIsAddingChildItem(false);
+                          }}
+                          className="flex flex-wrap items-center gap-2 p-2 rounded-lg bg-slate-50 dark:bg-slate-800/80 border border-blue-500/60 text-xs"
+                        >
+                          <select
+                            value={newChildType}
+                            onChange={e => setNewChildType(e.target.value as IssueType)}
+                            className="px-2 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-xs font-medium"
+                          >
+                            <option value="story">{t.storyType}</option>
+                            <option value="task">{t.taskType}</option>
+                            <option value="bug">{t.bugType}</option>
+                            <option value="feature">{t.featureType}</option>
+                          </select>
+                          <input
+                            type="text"
+                            value={newChildTitle}
+                            onChange={e => setNewChildTitle(e.target.value)}
+                            placeholder={language === 'fa' ? 'عنوان آیتم جدید را بنویسید...' : 'What needs to be done?'}
+                            autoFocus
+                            className="flex-1 min-w-[180px] px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-xs focus:outline-none focus:border-blue-500"
+                          />
+                          <button type="submit" className="px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded">
+                            {language === 'fa' ? 'ایجاد' : 'Create'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsAddingChildItem(false);
+                              setNewChildTitle('');
+                            }}
+                            className="px-2 py-1 text-slate-500 hover:text-slate-700 dark:hover:text-slate-300"
+                          >
+                            {t.cancel}
+                          </button>
+                        </form>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Subtasks */}
               <div className="space-y-2">
@@ -474,6 +926,71 @@ export const IssueDetailModal: React.FC = () => {
                     </button>
                     <button type="button" onClick={() => setIsLinkIssueOpen(false)} className="text-slate-400">
                       {t.cancel}
+                    </button>
+                  </form>
+                )}
+              </div>
+
+              {/* Attachments Section (F09, F26) */}
+              <div className="space-y-2">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                    <Paperclip className="w-3.5 h-3.5" />
+                    <span>
+                      {t.attachmentsView} ({(issue.attachments || []).length})
+                    </span>
+                  </h4>
+                  <button
+                    onClick={() => setIsAddingAttachment(prev => !prev)}
+                    className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium"
+                  >
+                    <Plus className="w-3 h-3" />
+                    <span>{language === 'fa' ? 'افزودن فایل' : 'Attach file'}</span>
+                  </button>
+                </div>
+
+                {(issue.attachments || []).length > 0 && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {(issue.attachments || []).map(att => (
+                      <div
+                        key={att.id}
+                        className="flex items-center justify-between p-2 rounded-md bg-slate-50 dark:bg-slate-800/40 border border-slate-200/70 dark:border-slate-800 text-xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <Paperclip className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                          <span className="font-medium text-slate-800 dark:text-slate-200 truncate">{att.name}</span>
+                        </div>
+                        <span className="font-mono text-[10px] text-slate-400 shrink-0">{att.size}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {isAddingAttachment && (
+                  <form
+                    onSubmit={e => {
+                      e.preventDefault();
+                      if (!attachmentName.trim()) return;
+                      addIssueAttachment(issue.id, {
+                        name: attachmentName.trim(),
+                        mimeType: attachmentName.includes('.pdf') ? 'application/pdf' : 'image/png',
+                        size: '184 KB',
+                      });
+                      setAttachmentName('');
+                      setIsAddingAttachment(false);
+                    }}
+                    className="flex gap-2 items-center bg-slate-50 dark:bg-slate-800 p-2 rounded-md border border-slate-200 dark:border-slate-700 text-xs"
+                  >
+                    <input
+                      type="text"
+                      value={attachmentName}
+                      onChange={e => setAttachmentName(e.target.value)}
+                      placeholder={language === 'fa' ? 'مثلاً architecture-spec.pdf' : 'e.g. architecture-spec.pdf'}
+                      className="flex-1 px-2.5 py-1 bg-white dark:bg-slate-900 border border-slate-300 dark:border-slate-700 rounded text-xs"
+                      autoFocus
+                    />
+                    <button type="submit" className="px-2.5 py-1 bg-blue-600 text-white font-semibold rounded">
+                      {t.save}
                     </button>
                   </form>
                 )}
@@ -723,7 +1240,60 @@ export const IssueDetailModal: React.FC = () => {
                         {!restrictResult.allowed && <Lock className="w-3 h-3 text-rose-500 shrink-0" />}
                       </button>
                     ))}
-                    <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1">
+                    <div className="border-t border-slate-100 dark:border-slate-800 mt-1 pt-1 space-y-1">
+                      {isAddingInlineStatus ? (
+                        <form
+                          onSubmit={e => {
+                            e.preventDefault();
+                            if (!inlineStatusName.trim()) return;
+                            const st = addWorkflowStatus({
+                              name: inlineStatusName.trim(),
+                              nameFa: inlineStatusName.trim(),
+                              category: 'inprogress',
+                            });
+                            moveIssueStatus(issue.id, st.id);
+                            setInlineStatusName('');
+                            setIsAddingInlineStatus(false);
+                            setStatusMenuOpen(false);
+                          }}
+                          className="p-1.5 flex gap-1"
+                        >
+                          <input
+                            type="text"
+                            value={inlineStatusName}
+                            onChange={e => setInlineStatusName(e.target.value)}
+                            placeholder={language === 'fa' ? 'نام وضعیت...' : 'New status...'}
+                            className="flex-1 px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded text-xs"
+                            autoFocus
+                          />
+                          <button type="submit" className="px-2 py-1 bg-blue-600 text-white rounded text-[11px] font-semibold">
+                            +
+                          </button>
+                        </form>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => setIsAddingInlineStatus(true)}
+                          className="w-full text-start px-2.5 py-1.5 rounded text-xs font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 flex items-center gap-1.5"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          <span>{t.addStatus}</span>
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setStatusMenuOpen(false);
+                          setSelectedIssueId(null);
+                          setActiveView('workflow');
+                        }}
+                        className="w-full text-start px-2.5 py-1.5 rounded text-xs font-semibold text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800 flex items-center gap-1.5"
+                      >
+                        <GitBranch className="w-3.5 h-3.5" />
+                        <span>{t.editWorkflow}</span>
+                      </button>
+
                       <button
                         type="button"
                         onClick={() => {
@@ -740,6 +1310,32 @@ export const IssueDetailModal: React.FC = () => {
                 )}
               </div>
 
+              {/* Details Collapsible Header Bar (matching Jira Cloud Details panel) */}
+              <div className="border border-slate-200 dark:border-slate-700/80 rounded-lg bg-white dark:bg-slate-900/60 overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-slate-100 dark:border-slate-800">
+                  <button
+                    type="button"
+                    onClick={() => setDetailsOpen(prev => !prev)}
+                    className="flex items-center gap-1.5 font-bold text-xs text-slate-800 dark:text-slate-100"
+                  >
+                    {detailsOpen ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronUp className="w-3.5 h-3.5" />}
+                    <span>{language === 'fa' ? 'جزئیات (Details)' : 'Details'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSelectedIssueId(null);
+                      setActiveView('settings');
+                    }}
+                    title={t.projectSettings}
+                    className="p-1 rounded text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
+                  >
+                    <Settings className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+
+                {detailsOpen && (
+                  <div className="p-3 space-y-3.5">
               {/* Resolution */}
               <div>
                 <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
@@ -906,6 +1502,9 @@ export const IssueDetailModal: React.FC = () => {
                   />
                 </div>
               </div>
+                  </div>
+                )}
+              </div>
 
               {/* Time Tracking Widget */}
               <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 space-y-2">
@@ -938,6 +1537,66 @@ export const IssueDetailModal: React.FC = () => {
                     </strong>
                   </span>
                 </div>
+              </div>
+
+              {/* Collapsible Development Panel (F31, F56) */}
+              <div className="bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => setDevPanelOpen(prev => !prev)}
+                  className="w-full px-3 py-2 flex items-center justify-between text-xs font-semibold text-slate-800 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-700/50"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Code2 className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>{t.developmentPanel}</span>
+                    <span className="font-mono text-[10px] text-slate-400">
+                      ({(issue.devLinks || []).length})
+                    </span>
+                  </span>
+                  {devPanelOpen ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                </button>
+                {devPanelOpen && (
+                  <div className="px-3 pb-3 pt-1 border-t border-slate-100 dark:border-slate-700 space-y-2 text-[11px]">
+                    {(issue.devLinks || []).map(dl => (
+                      <div key={dl.id} className="p-2 rounded bg-slate-50 dark:bg-slate-900/60 flex items-center justify-between gap-2">
+                        <div className="min-w-0">
+                          <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">{dl.title}</div>
+                          <div className="font-mono text-[10px] text-slate-400">
+                            {dl.type.toUpperCase()} · {dl.status}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                    <div className="flex items-center justify-between gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          addIssueDevLink(issue.id, {
+                            type: 'branch',
+                            title: `feature/${issue.key.toLowerCase()}-impl`,
+                            status: 'open',
+                            repo: 'nexus/core-platform',
+                            url: '#',
+                          })
+                        }
+                        className="text-blue-600 dark:text-blue-400 hover:underline font-semibold"
+                      >
+                        + {language === 'fa' ? 'ایجاد Branch' : 'Create branch'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedIssueId(null);
+                          setActiveView('development');
+                        }}
+                        className="text-slate-500 hover:text-blue-600 inline-flex items-center gap-1"
+                      >
+                        <span>{language === 'fa' ? 'صفحه توسعه' : 'Dev page'}</span>
+                        <ExternalLink className="w-3 h-3" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
 
               {/* Collapsible Automation – Rule executions Panel (F45) */}
