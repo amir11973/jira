@@ -1,15 +1,21 @@
 import React, { useState, useEffect } from 'react';
-import { X, Layers, Plus } from 'lucide-react';
+import { X, Flag } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { IssueType, Priority } from '../../types/jira';
 import { IssueTypeIcon, PriorityIcon } from '../common/JiraIcons';
 
 export const CreateIssueModal: React.FC = () => {
-  const { 
-    isCreateModalOpen, setIsCreateModalOpen, 
-    createModalDefaultSprintId, createIssue, 
-    currentProject, users, epics, sprints, 
-    t, language 
+  const {
+    isCreateModalOpen,
+    setIsCreateModalOpen,
+    createModalDefaultSprintId,
+    createIssue,
+    currentProject,
+    users,
+    epics,
+    sprints,
+    t,
+    language,
   } = useJira();
 
   const [issueType, setIssueType] = useState<IssueType>('story');
@@ -22,17 +28,22 @@ export const CreateIssueModal: React.FC = () => {
   const [storyPoints, setStoryPoints] = useState<number>(3);
   const [labels, setLabels] = useState<string>('frontend, api');
   const [component, setComponent] = useState<string>('Core Engine');
+  const [startDate, setStartDate] = useState<string>('');
+  const [dueDate, setDueDate] = useState<string>('');
+  const [flagged, setFlagged] = useState<boolean>(false);
 
   useEffect(() => {
     if (isCreateModalOpen) {
-      if (createModalDefaultSprintId !== undefined) {
+      if (currentProject.features?.sprints === false) {
+        setSprintId('');
+      } else if (createModalDefaultSprintId !== undefined) {
         setSprintId(createModalDefaultSprintId || '');
       } else {
         const active = sprints.find(s => s.projectId === currentProject.id && s.status === 'active');
         setSprintId(active ? active.id : '');
       }
     }
-  }, [isCreateModalOpen, createModalDefaultSprintId, sprints, currentProject.id]);
+  }, [isCreateModalOpen, createModalDefaultSprintId, sprints, currentProject.id, currentProject.features?.sprints]);
 
   if (!isCreateModalOpen) return null;
 
@@ -47,15 +58,20 @@ export const CreateIssueModal: React.FC = () => {
       priority,
       assigneeId: assigneeId || null,
       epicId: epicId || null,
-      sprintId: sprintId ? sprintId : null,
+      sprintId: currentProject.features?.sprints === false ? null : sprintId ? sprintId : null,
       storyPoints: Number(storyPoints) || 0,
       labels: labels.split(',').map(s => s.trim()).filter(Boolean),
       components: component ? [component] : [],
+      startDate: startDate || undefined,
+      dueDate: dueDate || undefined,
+      flagged,
     });
 
-    // Reset and close
     setSummary('');
     setDescription('');
+    setStartDate('');
+    setDueDate('');
+    setFlagged(false);
     setIsCreateModalOpen(false);
   };
 
@@ -64,18 +80,15 @@ export const CreateIssueModal: React.FC = () => {
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden my-8 animate-in fade-in zoom-in-95 duration-150">
-        {/* Header */}
+      <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl shadow-2xl w-full max-w-2xl overflow-hidden my-8">
         <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 dark:border-slate-800">
           <div className="flex items-center gap-2">
-            <h3 className="font-bold text-base text-slate-900 dark:text-white">
-              {t.createIssue}
-            </h3>
+            <h3 className="font-bold text-base text-slate-900 dark:text-white">{t.createIssue}</h3>
             <span className="text-xs px-2 py-0.5 rounded bg-slate-100 dark:bg-slate-800 text-slate-500 font-mono">
               {currentProject.key}
             </span>
           </div>
-          <button 
+          <button
             onClick={() => setIsCreateModalOpen(false)}
             className="p-1 rounded-md text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800"
           >
@@ -83,21 +96,20 @@ export const CreateIssueModal: React.FC = () => {
           </button>
         </div>
 
-        {/* Form Body */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4 text-xs">
-          {/* Issue Type & Priority Row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {language === 'fa' ? 'نوع تسک (Issue Type)' : 'Issue Type'} *
+                {language === 'fa' ? 'نوع تسک (Work Type)' : 'Work Type'} *
               </label>
               <div className="relative">
                 <select
                   value={issueType}
-                  onChange={(e) => setIssueType(e.target.value as IssueType)}
+                  onChange={e => setIssueType(e.target.value as IssueType)}
                   className="w-full ps-8 pe-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 font-medium text-slate-800 dark:text-slate-200"
                 >
                   <option value="story">{t.storyType}</option>
+                  <option value="feature">{t.featureType}</option>
                   <option value="task">{t.taskType}</option>
                   <option value="bug">{t.bugType}</option>
                   <option value="epic">{t.epicType}</option>
@@ -109,13 +121,11 @@ export const CreateIssueModal: React.FC = () => {
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {t.priority} *
-              </label>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.priority} *</label>
               <div className="relative">
                 <select
                   value={priority}
-                  onChange={(e) => setPriority(e.target.value as Priority)}
+                  onChange={e => setPriority(e.target.value as Priority)}
                   className="w-full ps-8 pe-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 font-medium text-slate-800 dark:text-slate-200"
                 >
                   <option value="highest">{t.highest}</option>
@@ -131,44 +141,39 @@ export const CreateIssueModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Summary */}
           <div>
-            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              {t.summary} *
-            </label>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.summary} *</label>
             <input
               type="text"
               required
               value={summary}
-              onChange={(e) => setSummary(e.target.value)}
-              placeholder={language === 'fa' ? 'عنوان تسک به صورت واضح و گویا...' : 'Enter a clear summary of the issue...'}
+              onChange={e => setSummary(e.target.value)}
+              placeholder={language === 'fa' ? 'عنوان تسک به صورت واضح و گویا...' : 'Enter a clear summary...'}
               className="w-full px-3 py-2 text-sm bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 text-slate-900 dark:text-white"
             />
           </div>
 
-          {/* Description */}
           <div>
-            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-              {t.description}
-            </label>
+            <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.description}</label>
             <textarea
-              rows={4}
+              rows={3}
               value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              placeholder={language === 'fa' ? 'شرح نیازمندی‌ها، شرایط پذیرش (Acceptance Criteria) و جزئیات...' : 'Describe the work, acceptance criteria, or repro steps...'}
+              onChange={e => setDescription(e.target.value)}
+              placeholder={
+                language === 'fa'
+                  ? 'شرح نیازمندی‌ها، شرایط پذیرش (Acceptance Criteria) و جزئیات...'
+                  : 'Describe the work, acceptance criteria, or repro steps...'
+              }
               className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 resize-none text-slate-800 dark:text-slate-200"
             />
           </div>
 
-          {/* Assignee & Story Points Row */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {t.assignee}
-              </label>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.assignee}</label>
               <select
                 value={assigneeId}
-                onChange={(e) => setAssigneeId(e.target.value)}
+                onChange={e => setAssigneeId(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500"
               >
                 <option value="">{language === 'fa' ? 'بدون مسئول (Unassigned)' : 'Unassigned'}</option>
@@ -181,52 +186,45 @@ export const CreateIssueModal: React.FC = () => {
             </div>
 
             <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {t.storyPoints}
-              </label>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.storyPoints}</label>
               <select
                 value={storyPoints}
-                onChange={(e) => setStoryPoints(Number(e.target.value))}
+                onChange={e => setStoryPoints(Number(e.target.value))}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 font-mono"
               >
-                <option value={1}>1 pt</option>
-                <option value={2}>2 pts</option>
-                <option value={3}>3 pts</option>
-                <option value={5}>5 pts</option>
-                <option value={8}>8 pts</option>
-                <option value={13}>13 pts</option>
-                <option value={21}>21 pts</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Sprint & Epic Row */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {t.sprint}
-              </label>
-              <select
-                value={sprintId}
-                onChange={(e) => setSprintId(e.target.value)}
-                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500"
-              >
-                <option value="">{language === 'fa' ? 'بک‌لاگ محصول (بدون اسپرینت)' : 'Product Backlog (No Sprint)'}</option>
-                {projectSprints.map(s => (
-                  <option key={s.id} value={s.id}>
-                    {s.name} {s.status === 'active' ? `(${language === 'fa' ? 'فعال' : 'Active'})` : ''}
+                {[1, 2, 3, 5, 8, 13, 21].map(pt => (
+                  <option key={pt} value={pt}>
+                    {pt} pts
                   </option>
                 ))}
               </select>
             </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            {currentProject.features?.sprints !== false && (
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.sprint}</label>
+                <select
+                  value={sprintId}
+                  onChange={e => setSprintId(e.target.value)}
+                  className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">{language === 'fa' ? 'بک‌لاگ محصول (بدون اسپرینت)' : 'Product Backlog (No Sprint)'}</option>
+                  {projectSprints.map(s => (
+                    <option key={s.id} value={s.id}>
+                      {s.name} {s.status === 'active' ? `(${language === 'fa' ? 'فعال' : 'Active'})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {t.epic}
-              </label>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.epic}</label>
               <select
                 value={epicId}
-                onChange={(e) => setEpicId(e.target.value)}
+                onChange={e => setEpicId(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500"
               >
                 <option value="">{language === 'fa' ? 'بدون اپیک' : 'None (No Epic)'}</option>
@@ -239,7 +237,39 @@ export const CreateIssueModal: React.FC = () => {
             </div>
           </div>
 
-          {/* Labels & Component */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.startDate}</label>
+              <input
+                type="date"
+                value={startDate}
+                onChange={e => setStartDate(e.target.value)}
+                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
+              />
+            </div>
+            <div>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.dueDate}</label>
+              <input
+                type="date"
+                value={dueDate}
+                onChange={e => setDueDate(e.target.value)}
+                className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
+              />
+            </div>
+            <div className="flex items-end pb-1.5">
+              <label className="flex items-center gap-2 cursor-pointer font-semibold text-slate-700 dark:text-slate-300">
+                <input
+                  type="checkbox"
+                  checked={flagged}
+                  onChange={e => setFlagged(e.target.checked)}
+                  className="rounded border-slate-300 text-amber-600"
+                />
+                <Flag className="w-3.5 h-3.5 text-amber-500" />
+                <span>{t.flagged}</span>
+              </label>
+            </div>
+          </div>
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
@@ -248,26 +278,21 @@ export const CreateIssueModal: React.FC = () => {
               <input
                 type="text"
                 value={labels}
-                onChange={(e) => setLabels(e.target.value)}
-                placeholder="backend, api, high-impact"
+                onChange={e => setLabels(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 font-mono text-xs"
               />
             </div>
             <div>
-              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
-                {t.components}
-              </label>
+              <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">{t.components}</label>
               <input
                 type="text"
                 value={component}
-                onChange={(e) => setComponent(e.target.value)}
-                placeholder="Auth Service, Web App, Database"
+                onChange={e => setComponent(e.target.value)}
                 className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500"
               />
             </div>
           </div>
 
-          {/* Footer Actions */}
           <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-200 dark:border-slate-800">
             <button
               type="button"

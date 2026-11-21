@@ -1,6 +1,6 @@
 import React from 'react';
 import { 
-  Bookmark, CheckSquare, Bug, Layers, CornerDownRight,
+  Bookmark, CheckSquare, Bug, Layers, CornerDownRight, Compass,
   ChevronUp, ChevronsUp, ChevronDown, ChevronsDown, Minus
 } from 'lucide-react';
 import { IssueType, Priority } from '../../types/jira';
@@ -11,6 +11,12 @@ export const IssueTypeIcon: React.FC<{ type: IssueType; className?: string }> = 
       return (
         <span title="Epic" className="inline-flex items-center justify-center text-purple-600 dark:text-purple-400">
           <Layers className={className} />
+        </span>
+      );
+    case 'feature':
+      return (
+        <span title="Feature" className="inline-flex items-center justify-center text-amber-600 dark:text-amber-400">
+          <Compass className={className} />
         </span>
       );
     case 'story':

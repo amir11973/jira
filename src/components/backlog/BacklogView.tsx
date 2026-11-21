@@ -62,7 +62,7 @@ export const BacklogView: React.FC = () => {
   // Helper to render points breakdown: todo (gray), inprogress (blue), done (green)
   const renderPointsBadge = (sprintIssues: Issue[]) => {
     const todoPts = sprintIssues.filter(i => i.status === 'todo' || i.status === 'backlog').reduce((a, i) => a + (i.storyPoints || 0), 0);
-    const inprogressPts = sprintIssues.filter(i => i.status === 'inprogress' || i.status === 'review').reduce((a, i) => a + (i.storyPoints || 0), 0);
+    const inprogressPts = sprintIssues.filter(i => i.status !== 'todo' && i.status !== 'backlog' && i.status !== 'done').reduce((a, i) => a + (i.storyPoints || 0), 0);
     const donePts = sprintIssues.filter(i => i.status === 'done').reduce((a, i) => a + (i.storyPoints || 0), 0);
 
     return (
