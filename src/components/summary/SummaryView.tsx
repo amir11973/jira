@@ -8,8 +8,13 @@ import {
   Activity,
   BarChart3,
   Layers,
+  ShieldAlert,
+  Wallet,
+  Milestone,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
+import { formatLocalizedDateOnly } from '../../utils/jalaliDate';
+import { formatLocalizedNumber } from '../../utils/i18n';
 import { IssueTypeIcon, PriorityIcon, UserAvatar } from '../common/JiraIcons';
 
 export const SummaryView: React.FC = () => {
@@ -18,11 +23,18 @@ export const SummaryView: React.FC = () => {
     issues,
     statuses,
     users,
+    risks,
+    milestones,
+    updateRiskStatus,
+    updateMilestoneStatus,
     setSelectedIssueId,
     setActiveView,
     language,
     t,
   } = useJira();
+
+  const projectRisks = risks.filter(r => r.projectId === currentProject.id);
+  const projectMilestones = milestones.filter(m => m.projectId === currentProject.id);
 
   const projectIssues = issues.filter(i => i.projectId === currentProject.id && !i.archived);
 
@@ -392,6 +404,133 @@ export const SummaryView: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Budget, Risks & Milestones Governance Strip (populated via Excel/Integration Center) */}
+      {(currentProject.budgetAllocated || projectRisks.length > 0 || projectMilestones.length > 0) && (
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+          {/* Project Budget Card */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+              <Wallet className="w-4 h-4 text-emerald-600" />
+              <span>{language === 'fa' ? 'بودجه و هزینه‌کرد فضا' : 'Project Budget'}</span>
+            </h3>
+            {currentProject.budgetAllocated ? (
+              <div className="space-y-2 text-xs">
+                <div className="flex justify-between">
+                  <span className="text-slate-500">{language === 'fa' ? 'بودجه مصوب' : 'Allocated'}</span>
+                  <span className="font-mono font-bold tabular-nums text-slate-900 dark:text-white">
+                    {formatLocalizedNumber(currentProject.budgetAllocated.toLocaleString(), language)}{' '}
+                    {currentProject.currency || 'USD'}
+                  </span>
+                </div>
+                <div className="flex justify-between">
+                  <span className="text-slate-500">{language === 'fa' ? 'مصرف‌شده' : 'Spent'}</span>
+                  <span className="font-mono font-semibold tabular-nums text-slate-700 dark:text-slate-300">
+                    {formatLocalizedNumber((currentProject.budgetSpent || 0).toLocaleString(), language)}{' '}
+                    {currentProject.currency || 'USD'}
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-emerald-500 rounded-full"
+                    style={{
+                      width: `${Math.min(
+                        100,
+                        Math.round(((currentProject.budgetSpent || 0) / currentProject.budgetAllocated) * 100)
+                      )}%`,
+                    }}
+                  />
+                </div>
+              </div>
+            ) : (
+              <p className="text-xs text-slate-400">
+                {language === 'fa' ? 'بودجه‌ای وارد نشده است.' : 'No budget allocated yet.'}
+              </p>
+            )}
+          </div>
+
+          {/* Risks Register */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <ShieldAlert className="w-4 h-4 text-rose-500" />
+                <span>{language === 'fa' ? 'فهرست ریسک‌ها' : 'Risks Register'}</span>
+              </span>
+              <span className="font-mono text-xs text-slate-400 tabular-nums">
+                {formatLocalizedNumber(projectRisks.length, language)}
+              </span>
+            </h3>
+            <div className="space-y-2 max-h-44 overflow-y-auto text-xs">
+              {projectRisks.length === 0 ? (
+                <p className="text-slate-400">{language === 'fa' ? 'ریسکی ثبت نشده است.' : 'No risks registered.'}</p>
+              ) : (
+                projectRisks.map(r => (
+                  <div key={r.id} className="p-2 rounded border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                        <span className="font-mono text-rose-600 me-1">{r.key}</span>
+                        {language === 'fa' ? r.titleFa : r.title}
+                      </div>
+                      <div className="text-[10px] text-slate-400">
+                        {r.probability}/{r.impact} · {r.category}
+                      </div>
+                    </div>
+                    <select
+                      value={r.status}
+                      onChange={e => updateRiskStatus(r.id, e.target.value as typeof r.status)}
+                      className="px-1.5 py-0.5 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    >
+                      <option value="open">open</option>
+                      <option value="mitigating">mitigating</option>
+                      <option value="closed">closed</option>
+                    </select>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          {/* Milestones */}
+          <div className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3">
+            <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <Milestone className="w-4 h-4 text-blue-600" />
+                <span>{language === 'fa' ? 'نقاط عطف (Milestones)' : 'Milestones'}</span>
+              </span>
+              <span className="font-mono text-xs text-slate-400 tabular-nums">
+                {formatLocalizedNumber(projectMilestones.length, language)}
+              </span>
+            </h3>
+            <div className="space-y-2 max-h-44 overflow-y-auto text-xs">
+              {projectMilestones.length === 0 ? (
+                <p className="text-slate-400">{language === 'fa' ? 'نقطه عطفی ثبت نشده است.' : 'No milestones imported.'}</p>
+              ) : (
+                projectMilestones.map(m => (
+                  <div key={m.id} className="p-2 rounded border border-slate-200 dark:border-slate-800 flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
+                        {language === 'fa' ? m.titleFa : m.title}
+                      </div>
+                      <div className="text-[10px] font-mono text-slate-400">
+                        {formatLocalizedDateOnly(m.dueDate, language)}
+                      </div>
+                    </div>
+                    <select
+                      value={m.status}
+                      onChange={e => updateMilestoneStatus(m.id, e.target.value as typeof m.status)}
+                      className="px-1.5 py-0.5 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
+                    >
+                      <option value="upcoming">upcoming</option>
+                      <option value="completed">completed</option>
+                      <option value="at_risk">at_risk</option>
+                    </select>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

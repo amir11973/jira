@@ -34,6 +34,14 @@ import {
   GlobalSidebarItemKey,
   PlanItem,
   QuickCreateModalType,
+  IntegrationImportPayload,
+  IntegrationImportResult,
+  MappingTemplate,
+  RecentExcelImport,
+  IntegrationSyncRecord,
+  SpaceDocPage,
+  RiskItem,
+  MilestoneItem,
 } from '../types/jira';
 import {
   DEFAULT_SPACE_TABS,
@@ -74,6 +82,7 @@ const ALL_SIDEBAR_SECTIONS: GlobalSidebarItemKey[] = [
   'dashboards',
   'assets',
   'teams',
+  'integrations',
 ];
 
 interface JiraContextType {
@@ -167,6 +176,8 @@ interface JiraContextType {
   goals: GoalItem[];
   teams: TeamEntity[];
   assets: AssetEntity[];
+  risks: RiskItem[];
+  milestones: MilestoneItem[];
   siteConfig: SiteConfig;
   updateSiteConfig: (updates: Partial<SiteConfig>) => void;
 
@@ -184,6 +195,10 @@ interface JiraContextType {
   updateGoalStatus: (id: string, status: GoalItem['status']) => void;
   createTeam: (data: Omit<TeamEntity, 'id'>) => TeamEntity;
   createAsset: (data: Omit<AssetEntity, 'id'>) => AssetEntity;
+  createRisk: (data: Omit<RiskItem, 'id' | 'createdAt' | 'updatedAt'>) => RiskItem;
+  updateRiskStatus: (id: string, status: RiskItem['status']) => void;
+  createMilestone: (data: Omit<MilestoneItem, 'id'>) => MilestoneItem;
+  updateMilestoneStatus: (id: string, status: MilestoneItem['status']) => void;
 
   // Workflow Actions & Navigation
   workflowViewerIssueId: string | null;
@@ -254,6 +269,17 @@ interface JiraContextType {
   updateEpic: (id: string, updates: Partial<Epic>) => void;
   createVersion: (ver: Omit<Version, 'id' | 'projectId'>) => Version;
   toggleReleaseVersion: (versionId: string) => void;
+
+  // Integration Center API & Batch Upsert
+  apiFetch: (url: string, init?: RequestInit) => Promise<globalThis.Response>;
+  importIntegrationData: (payload: IntegrationImportPayload) => IntegrationImportResult;
+  recentExcelImports: RecentExcelImport[];
+  addRecentExcelImport: (rec: RecentExcelImport) => void;
+  mappingTemplates: MappingTemplate[];
+  saveMappingTemplate: (tpl: MappingTemplate) => void;
+  deleteMappingTemplate: (id: string) => void;
+  syncHistory: IntegrationSyncRecord[];
+  addSyncHistoryRecord: (rec: IntegrationSyncRecord) => void;
 
   // Reset
   resetToDemoData: () => void;
@@ -347,6 +373,18 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return initialUsers[0];
   });
 
+  // In-memory only Bearer session token (never stored in localStorage/sessionStorage)
+  const [apiSessionToken, setApiSessionToken] = useState<string | null>(null);
+  const [recentExcelImports, setRecentExcelImports] = useState<RecentExcelImport[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}excel_imports`, [])
+  );
+  const [mappingTemplates, setMappingTemplates] = useState<MappingTemplate[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}mapping_templates`, [])
+  );
+  const [syncHistory, setSyncHistory] = useState<IntegrationSyncRecord[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}sync_history`, [])
+  );
+
   const [workflows, setWorkflows] = useState<WorkflowDefinition[]>(() =>
     safeParse(`${STORAGE_KEY_PREFIX}workflows`, initialWorkflows)
   );
@@ -419,6 +457,12 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
   const [assets, setAssets] = useState<AssetEntity[]>(() =>
     safeParse(`${STORAGE_KEY_PREFIX}assets`, initialAssets)
+  );
+  const [risks, setRisks] = useState<RiskItem[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}risks`, [])
+  );
+  const [milestones, setMilestones] = useState<MilestoneItem[]>(() =>
+    safeParse(`${STORAGE_KEY_PREFIX}milestones`, [])
   );
   const [appNotifications, setAppNotifications] = useState<AppNotification[]>(() =>
     safeParse(`${STORAGE_KEY_PREFIX}notifications`, initialNotifications)
@@ -539,6 +583,14 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [assets]);
 
   useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}risks`, JSON.stringify(risks));
+  }, [risks]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}milestones`, JSON.stringify(milestones));
+  }, [milestones]);
+
+  useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}notifications`, JSON.stringify(appNotifications));
   }, [appNotifications]);
 
@@ -551,13 +603,75 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.setItem(`${STORAGE_KEY_PREFIX}current_user`, JSON.stringify(currentUser));
     } else {
       localStorage.setItem(`${STORAGE_KEY_PREFIX}current_user`, JSON.stringify(null));
+      setApiSessionToken(null);
     }
   }, [currentUser]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}excel_imports`, JSON.stringify(recentExcelImports));
+  }, [recentExcelImports]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}mapping_templates`, JSON.stringify(mappingTemplates));
+  }, [mappingTemplates]);
+
+  useEffect(() => {
+    localStorage.setItem(`${STORAGE_KEY_PREFIX}sync_history`, JSON.stringify(syncHistory));
+  }, [syncHistory]);
+
+  const fetchSessionToken = useCallback(async (usr: User): Promise<string | null> => {
+    try {
+      const res = await fetch('/api/auth/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: usr.id, email: usr.email, role: usr.role }),
+      });
+      if (!res.ok) return null;
+      const data = (await res.json()) as { token?: string };
+      if (data.token) {
+        setApiSessionToken(data.token);
+        return data.token;
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }, []);
+
+  useEffect(() => {
+    if (currentUser) {
+      void fetchSessionToken(currentUser);
+    }
+  }, [currentUser, fetchSessionToken]);
+
+  const apiFetch = useCallback(
+    async (url: string, init?: RequestInit): Promise<globalThis.Response> => {
+      let token = apiSessionToken;
+      if (!token && currentUser) {
+        token = await fetchSessionToken(currentUser);
+      }
+      const headers = new Headers(init?.headers || {});
+      if (token) headers.set('Authorization', `Bearer ${token}`);
+      let res = await fetch(url, { ...init, headers });
+      if (res.status === 401 && currentUser) {
+        const refreshed = await fetchSessionToken(currentUser);
+        if (refreshed) {
+          headers.set('Authorization', `Bearer ${refreshed}`);
+          res = await fetch(url, { ...init, headers });
+        }
+      }
+      return res;
+    },
+    [apiSessionToken, currentUser, fetchSessionToken]
+  );
 
   const toggleLanguage = () => setLanguage(prev => (prev === 'fa' ? 'en' : 'fa'));
   const toggleTheme = () => setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
   const login = (user: User) => setCurrentUser(user);
-  const logout = () => setCurrentUser(null);
+  const logout = () => {
+    setApiSessionToken(null);
+    setCurrentUser(null);
+  };
 
   const toggleSidebarSection = (sec: GlobalSidebarItemKey) => {
     setVisibleSidebarSections(prev =>
@@ -1701,6 +1815,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setGoals(initialGoals);
     setTeams(initialTeams);
     setAssets(initialAssets);
+    setRisks([]);
+    setMilestones([]);
     setAppNotifications(initialNotifications);
     setSiteConfig(initialSiteConfig);
     setVisibleSidebarSections(ALL_SIDEBAR_SECTIONS);
@@ -1722,6 +1838,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       'goals',
       'teams',
       'assets',
+      'risks',
+      'milestones',
       'notifications',
       'site_config',
       'sidebar_sections',
@@ -1730,6 +1848,864 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       'cur_proj',
     ];
     keys.forEach(k => localStorage.removeItem(`${STORAGE_KEY_PREFIX}${k}`));
+  };
+
+  const createRisk = (data: Omit<RiskItem, 'id' | 'createdAt' | 'updatedAt'>): RiskItem => {
+    const nowIso = new Date().toISOString();
+    const rec: RiskItem = {
+      ...data,
+      id: `risk-${Date.now()}`,
+      createdAt: nowIso,
+      updatedAt: nowIso,
+    };
+    setRisks(prev => [rec, ...prev]);
+    return rec;
+  };
+
+  const updateRiskStatus = (id: string, status: RiskItem['status']) => {
+    const nowIso = new Date().toISOString();
+    setRisks(prev => prev.map(r => (r.id === id ? { ...r, status, updatedAt: nowIso } : r)));
+  };
+
+  const createMilestone = (data: Omit<MilestoneItem, 'id'>): MilestoneItem => {
+    const rec: MilestoneItem = {
+      ...data,
+      id: `ms-${Date.now()}`,
+    };
+    setMilestones(prev => [rec, ...prev]);
+    return rec;
+  };
+
+  const updateMilestoneStatus = (id: string, status: MilestoneItem['status']) => {
+    setMilestones(prev => prev.map(m => (m.id === id ? { ...m, status } : m)));
+  };
+
+  const addRecentExcelImport = (rec: RecentExcelImport) => {
+    setRecentExcelImports(prev => [rec, ...prev].slice(0, 20));
+  };
+
+  const saveMappingTemplate = (tpl: MappingTemplate) => {
+    setMappingTemplates(prev => {
+      const idx = prev.findIndex(t => t.id === tpl.id || t.name.toLowerCase() === tpl.name.toLowerCase());
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = tpl;
+        return copy;
+      }
+      return [tpl, ...prev].slice(0, 30);
+    });
+  };
+
+  const deleteMappingTemplate = (id: string) => {
+    setMappingTemplates(prev => prev.filter(t => t.id !== id));
+  };
+
+  const addSyncHistoryRecord = (rec: IntegrationSyncRecord) => {
+    setSyncHistory(prev => [rec, ...prev].slice(0, 50));
+  };
+
+  const importIntegrationData = (payload: IntegrationImportPayload): IntegrationImportResult => {
+    let createdCount = 0;
+    let updatedCount = 0;
+    let skippedCount = 0;
+    const warnings: string[] = [];
+    const importedLinks: NonNullable<IntegrationImportResult['importedLinks']> = [];
+    const now = new Date().toISOString();
+    const actorId = currentUser?.id || users[0]?.id || 'user-1';
+    const policy = payload.conflictPolicy || 'source_wins';
+
+    // 1. Resolve or create target project/space synchronously
+    let nextProjects = [...projects];
+    let nextWorkflows = [...workflows];
+    let targetProj = nextProjects.find(p => p.id === payload.targetProjectId) || currentProject;
+
+    const createWorkflowForProj = (projId: string, projKey: string): WorkflowDefinition => ({
+      id: `wf-${projId}`,
+      projectId: projId,
+      name: `${projKey} Imported Workflow`,
+      statuses: [...initialStatuses],
+      transitions: initialWorkflows[0].transitions.map(tr => ({
+        ...tr,
+        id: `${tr.id}-${projId}`,
+        rules: [...tr.rules],
+      })),
+    });
+
+    if (payload.createNewSpace && payload.createNewSpace.key && payload.createNewSpace.name) {
+      const cleanKey =
+        payload.createNewSpace.key.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8) || 'IMP';
+      const existingByKey = nextProjects.find(p => p.key.toUpperCase() === cleanKey);
+      if (existingByKey) {
+        targetProj = existingByKey;
+      } else {
+        const newId = `proj-imp-${Date.now()}`;
+        const tpl = payload.createNewSpace.template || 'scrum';
+        const createdProj: Project = {
+          id: newId,
+          key: cleanKey,
+          name: payload.createNewSpace.name,
+          nameFa: payload.createNewSpace.nameFa || payload.createNewSpace.name,
+          description: payload.createNewSpace.description || `Imported from ${payload.source}`,
+          leadId: actorId,
+          avatarColor: payload.source === 'confluence' ? 'bg-indigo-600' : 'bg-blue-600',
+          category: 'Imported Space',
+          template: tpl,
+          starred: false,
+          enabledTabs:
+            tpl === 'scrum'
+              ? [...DEFAULT_SPACE_TABS, 'backlog', 'releases']
+              : [...DEFAULT_SPACE_TABS],
+          shortcuts: [],
+          docs: [],
+          policies: [],
+          features: {
+            sprints: tpl === 'scrum',
+            estimation: true,
+            standups: true,
+            forms: true,
+            releases: true,
+          },
+          notifications: {
+            onCreated: true,
+            onTransitioned: true,
+            onCommented: true,
+            onAssigned: true,
+            senderName: `JiraFlow (${cleanKey})`,
+          },
+        };
+        nextProjects = [...nextProjects, createdProj];
+        nextWorkflows = [...nextWorkflows, createWorkflowForProj(newId, cleanKey)];
+        targetProj = createdProj;
+        createdCount++;
+      }
+    }
+
+    // 2. Upsert Projects if destinationModule === 'projects'
+    if (payload.projects && payload.projects.length > 0) {
+      for (const pData of payload.projects) {
+        const cleanKey = pData.key.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 8);
+        if (!cleanKey) {
+          skippedCount++;
+          continue;
+        }
+        const idx = nextProjects.findIndex(p => p.key.toUpperCase() === cleanKey);
+        if (idx >= 0) {
+          nextProjects[idx] = {
+            ...nextProjects[idx],
+            name: pData.name || nextProjects[idx].name,
+            nameFa: pData.nameFa || nextProjects[idx].nameFa,
+            description: pData.description ?? nextProjects[idx].description,
+            category: pData.category || nextProjects[idx].category,
+            budgetAllocated: pData.budgetAllocated ?? nextProjects[idx].budgetAllocated,
+            budgetSpent: pData.budgetSpent ?? nextProjects[idx].budgetSpent,
+            currency: pData.currency || nextProjects[idx].currency,
+          };
+          updatedCount++;
+        } else {
+          const npId = `proj-imp-${Date.now()}-${cleanKey}`;
+          const tpl = pData.template || 'scrum';
+          nextProjects.push({
+            id: npId,
+            key: cleanKey,
+            name: pData.name,
+            nameFa: pData.nameFa || pData.name,
+            description: pData.description || '',
+            leadId: pData.leadId || actorId,
+            avatarColor: 'bg-blue-600',
+            category: pData.category || 'Software',
+            template: tpl,
+            starred: false,
+            budgetAllocated: pData.budgetAllocated,
+            budgetSpent: pData.budgetSpent,
+            currency: pData.currency || 'USD',
+            enabledTabs: [...DEFAULT_SPACE_TABS, 'backlog', 'releases'],
+            shortcuts: [],
+            docs: [],
+            policies: [],
+            features: { sprints: tpl === 'scrum', estimation: true, standups: true, forms: true, releases: true },
+          });
+          nextWorkflows.push(createWorkflowForProj(npId, cleanKey));
+          createdCount++;
+        }
+      }
+    }
+
+    // 2b. Apply project budget imports
+    if (payload.budgets && payload.budgets.length > 0) {
+      for (const b of payload.budgets) {
+        const cleanKey = (b.projectKey || targetProj.key).toUpperCase().replace(/[^A-Z0-9]/g, '');
+        const idx = nextProjects.findIndex(p => p.key.toUpperCase() === cleanKey);
+        if (idx >= 0) {
+          nextProjects[idx] = {
+            ...nextProjects[idx],
+            budgetAllocated: b.allocated ?? nextProjects[idx].budgetAllocated,
+            budgetSpent: b.spent ?? nextProjects[idx].budgetSpent,
+            currency: b.currency || nextProjects[idx].currency || 'USD',
+          };
+          if (targetProj.id === nextProjects[idx].id) targetProj = nextProjects[idx];
+          updatedCount++;
+        } else {
+          warnings.push(`Budget row skipped: Project "${cleanKey}" not found.`);
+          skippedCount++;
+        }
+      }
+    }
+
+    // 3. Apply missing workflow statuses requested during mapping
+    if (payload.missingStatusesToAdd && payload.missingStatusesToAdd.length > 0) {
+      nextWorkflows = nextWorkflows.map(wf => {
+        if (wf.projectId !== targetProj.id) return wf;
+        const addedStatuses: Status[] = [];
+        const addedTransitions: WorkflowTransition[] = [];
+        for (const ms of payload.missingStatusesToAdd!) {
+          if (wf.statuses.some(s => s.id === ms.id || s.name.toLowerCase() === ms.name.toLowerCase())) {
+            continue;
+          }
+          const color =
+            ms.category === 'done'
+              ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
+              : ms.category === 'inprogress'
+              ? 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300'
+              : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+          addedStatuses.push({
+            id: ms.id,
+            numericId: 10050 + wf.statuses.length + addedStatuses.length,
+            name: ms.name,
+            nameFa: ms.nameFa || ms.name,
+            category: ms.category,
+            color,
+          });
+          addedTransitions.push({
+            id: `tr-imp-${ms.id}-${Date.now()}`,
+            numericId: (wf.transitions.length + addedTransitions.length + 1) * 10,
+            name: ms.name,
+            nameFa: ms.nameFa || ms.name,
+            fromStatusId: 'any',
+            toStatusId: ms.id,
+            rules: [],
+          });
+        }
+        return {
+          ...wf,
+          statuses: [...wf.statuses, ...addedStatuses],
+          transitions: [...wf.transitions, ...addedTransitions],
+        };
+      });
+    }
+    setWorkflows(nextWorkflows);
+
+    // 4. Upsert Versions (fixVersions + discovered project versions)
+    const nextVersions = [...versions];
+    const versionIdByName = new Map<string, string>();
+    nextVersions
+      .filter(v => v.projectId === targetProj.id)
+      .forEach(v => versionIdByName.set(v.name.toLowerCase(), v.id));
+
+    const versionNamesToEnsure = new Map<string, { description?: string; releaseDate?: string; isReleased?: boolean }>();
+    for (const v of payload.versions || []) {
+      if (v.name) versionNamesToEnsure.set(v.name.trim(), v);
+    }
+    for (const iss of payload.issues || []) {
+      for (const vn of iss._versionNamesHint || []) {
+        if (vn.trim() && !versionNamesToEnsure.has(vn.trim())) {
+          versionNamesToEnsure.set(vn.trim(), {});
+        }
+      }
+    }
+    versionNamesToEnsure.forEach((meta, vName) => {
+      if (!versionIdByName.has(vName.toLowerCase())) {
+        const verId = `ver-imp-${Date.now()}-${nextVersions.length + 1}`;
+        nextVersions.push({
+          id: verId,
+          projectId: targetProj.id,
+          name: vName,
+          description: meta.description || '',
+          releaseDate: meta.releaseDate,
+          isReleased: Boolean(meta.isReleased),
+        });
+        versionIdByName.set(vName.toLowerCase(), verId);
+      }
+    });
+    setVersions(nextVersions);
+
+    // 5. Upsert Epics
+    const nextEpics = [...epics];
+    const epicLookupByKeyOrName = new Map<string, string>();
+    nextEpics
+      .filter(e => e.projectId === targetProj.id)
+      .forEach(e => {
+        epicLookupByKeyOrName.set(e.key.toLowerCase(), e.id);
+        epicLookupByKeyOrName.set(e.name.toLowerCase(), e.id);
+      });
+
+    if (payload.epics && payload.epics.length > 0) {
+      let localCounter = nextEpics.filter(e => e.projectId === targetProj.id).length + 1;
+      for (const epData of payload.epics) {
+        const idx = nextEpics.findIndex(
+          e =>
+            e.projectId === targetProj.id &&
+            ((epData.key && e.key.toLowerCase() === epData.key.toLowerCase()) ||
+              e.name.toLowerCase() === epData.name.toLowerCase())
+        );
+        if (idx >= 0) {
+          nextEpics[idx] = {
+            ...nextEpics[idx],
+            summary: epData.summary || nextEpics[idx].summary,
+            status: epData.status || nextEpics[idx].status,
+            startDate: epData.startDate || nextEpics[idx].startDate,
+            dueDate: epData.dueDate || nextEpics[idx].dueDate,
+          };
+          epicLookupByKeyOrName.set(nextEpics[idx].key.toLowerCase(), nextEpics[idx].id);
+          epicLookupByKeyOrName.set(nextEpics[idx].name.toLowerCase(), nextEpics[idx].id);
+          updatedCount++;
+        } else {
+          const newEpicId = `epic-imp-${Date.now()}-${localCounter}`;
+          const key = epData.key || `${targetProj.key}-EPIC-${localCounter++}`;
+          const newEp: Epic = {
+            id: newEpicId,
+            key,
+            projectId: targetProj.id,
+            name: epData.name,
+            nameFa: epData.nameFa || epData.name,
+            summary: epData.summary || epData.name,
+            color: epData.color || '#8b5cf6',
+            status: epData.status || 'inprogress',
+            startDate: epData.startDate || now.split('T')[0],
+            dueDate: epData.dueDate || new Date(Date.now() + 30 * 86400000).toISOString().split('T')[0],
+          };
+          nextEpics.push(newEp);
+          epicLookupByKeyOrName.set(newEp.key.toLowerCase(), newEp.id);
+          epicLookupByKeyOrName.set(newEp.name.toLowerCase(), newEp.id);
+          createdCount++;
+        }
+      }
+      setEpics(nextEpics);
+    }
+
+    // 6. Upsert Sprints / Schedules
+    const nextSprints = [...sprints];
+    const sprintLookupByName = new Map<string, string>();
+    nextSprints
+      .filter(s => s.projectId === targetProj.id)
+      .forEach(s => sprintLookupByName.set(s.name.toLowerCase(), s.id));
+
+    if (payload.sprints && payload.sprints.length > 0) {
+      payload.sprints.forEach((spData, idx) => {
+        const existingIdx = nextSprints.findIndex(
+          s => s.projectId === targetProj.id && s.name.toLowerCase() === spData.name.toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          nextSprints[existingIdx] = {
+            ...nextSprints[existingIdx],
+            goal: spData.goal ?? nextSprints[existingIdx].goal,
+            status: spData.status || nextSprints[existingIdx].status,
+            startDate: spData.startDate || nextSprints[existingIdx].startDate,
+            endDate: spData.endDate || nextSprints[existingIdx].endDate,
+          };
+          sprintLookupByName.set(nextSprints[existingIdx].name.toLowerCase(), nextSprints[existingIdx].id);
+          if (payload.destinationModule === 'schedules') updatedCount++;
+        } else {
+          const spId = `sprint-imp-${Date.now()}-${idx}`;
+          const newSp: Sprint = {
+            id: spId,
+            projectId: targetProj.id,
+            name: spData.name,
+            goal: spData.goal || '',
+            status: spData.status || 'planned',
+            startDate: spData.startDate,
+            endDate: spData.endDate,
+          };
+          nextSprints.push(newSp);
+          sprintLookupByName.set(newSp.name.toLowerCase(), spId);
+          if (payload.destinationModule === 'schedules') createdCount++;
+        }
+      });
+      setSprints(nextSprints);
+    }
+
+    // 7. Upsert Work Items (Issues) preserving Project -> Epic -> Story/Task -> Subtask & Dependencies
+    if (payload.issues && payload.issues.length > 0) {
+      const nextIssues = [...issues];
+      let nextNum = 101 + nextIssues.filter(i => i.projectId === targetProj.id).length;
+
+      const issueIdByKey = new Map<string, string>();
+      nextIssues
+        .filter(i => i.projectId === targetProj.id)
+        .forEach(i => {
+          issueIdByKey.set(i.key.toLowerCase(), i.id);
+          if (i.externalKey) issueIdByKey.set(i.externalKey.toLowerCase(), i.id);
+        });
+
+      const pendingParentLinks: Array<{ childId: string; parentKey: string }> = [];
+
+      payload.issues.forEach((issData, idx) => {
+        const resolvedSprintId = issData._sprintHint
+          ? sprintLookupByName.get(issData._sprintHint.toLowerCase()) || null
+          : issData.sprintId ?? null;
+        const resolvedEpicId = issData._epicHint
+          ? epicLookupByKeyOrName.get(issData._epicHint.toLowerCase()) || null
+          : issData._parentKeyHint && epicLookupByKeyOrName.has(issData._parentKeyHint.toLowerCase())
+          ? epicLookupByKeyOrName.get(issData._parentKeyHint.toLowerCase()) || null
+          : issData.epicId ?? null;
+
+        const resolvedFixVersionIds = (issData._versionNamesHint || [])
+          .map(vn => versionIdByName.get(vn.toLowerCase()))
+          .filter((v): v is string => Boolean(v));
+
+        const existingIdx = nextIssues.findIndex(
+          i =>
+            i.projectId === targetProj.id &&
+            ((issData.key && (i.key.toLowerCase() === issData.key.toLowerCase() || i.externalKey?.toLowerCase() === issData.key.toLowerCase())) ||
+              (!issData.key && i.summary.toLowerCase() === issData.summary.toLowerCase()))
+        );
+
+        const extraLinks: IssueLink[] = issData._dependencyHint
+          ? [
+              {
+                id: `lnk-imp-${Date.now()}-${idx}`,
+                type: 'blocks',
+                targetIssueKey: issData._dependencyHint,
+              },
+            ]
+          : [];
+
+        if (existingIdx >= 0) {
+          if (policy === 'destination_wins') {
+            skippedCount++;
+            return;
+          }
+          const existing = nextIssues[existingIdx];
+          const mergedLinks = [...existing.links];
+          for (const nl of extraLinks) {
+            if (!mergedLinks.some(el => el.targetIssueKey.toLowerCase() === nl.targetIssueKey.toLowerCase())) {
+              mergedLinks.push(nl);
+            }
+          }
+
+          nextIssues[existingIdx] = {
+            ...existing,
+            description: issData.description || existing.description,
+            status: issData.status || existing.status,
+            priority: issData.priority || existing.priority,
+            type: issData.type || existing.type,
+            assigneeId: issData.assigneeId !== undefined ? issData.assigneeId : existing.assigneeId,
+            storyPoints: issData.storyPoints ?? existing.storyPoints,
+            originalEstimateMinutes: issData.originalEstimateMinutes ?? existing.originalEstimateMinutes,
+            remainingEstimateMinutes: issData.remainingEstimateMinutes ?? existing.remainingEstimateMinutes,
+            startDate: issData.startDate || existing.startDate,
+            dueDate: issData.dueDate || existing.dueDate,
+            team: issData.team || existing.team,
+            wbsCode: issData.wbsCode || existing.wbsCode,
+            estimatedCost: issData.estimatedCost ?? existing.estimatedCost,
+            actualCost: issData.actualCost ?? existing.actualCost,
+            isMilestone: issData.isMilestone ?? existing.isMilestone,
+            externalKey: issData.externalKey || existing.externalKey,
+            externalUrl: issData.externalUrl || existing.externalUrl,
+            customFields: issData.customFields ? { ...(existing.customFields || {}), ...issData.customFields } : existing.customFields,
+            epicId: resolvedEpicId || existing.epicId,
+            sprintId: resolvedSprintId !== null ? resolvedSprintId : existing.sprintId,
+            fixVersionIds:
+              resolvedFixVersionIds.length > 0
+                ? Array.from(new Set([...existing.fixVersionIds, ...resolvedFixVersionIds]))
+                : existing.fixVersionIds,
+            links: mergedLinks,
+            labels:
+              issData.labels && issData.labels.length > 0
+                ? Array.from(new Set([...existing.labels, ...issData.labels]))
+                : existing.labels,
+            components:
+              issData.components && issData.components.length > 0
+                ? Array.from(new Set([...existing.components, ...issData.components]))
+                : existing.components,
+            attachments: issData.attachments && issData.attachments.length > 0 ? issData.attachments : existing.attachments,
+            comments: issData.comments && issData.comments.length > 0 ? issData.comments : existing.comments,
+            updatedAt: now,
+          };
+          issueIdByKey.set(nextIssues[existingIdx].key.toLowerCase(), nextIssues[existingIdx].id);
+          if (issData._parentKeyHint && !epicLookupByKeyOrName.has(issData._parentKeyHint.toLowerCase())) {
+            pendingParentLinks.push({ childId: nextIssues[existingIdx].id, parentKey: issData._parentKeyHint });
+          }
+          importedLinks.push({
+            externalEntityType: 'issue',
+            externalEntityId: issData._externalId || issData.key || nextIssues[existingIdx].key,
+            externalKey: issData.key || nextIssues[existingIdx].key,
+            externalUrl: issData.externalUrl,
+            localEntityType: 'issue',
+            localEntityId: nextIssues[existingIdx].id,
+            syncHash: `${issData.summary}:${issData.status}:${issData.updatedAt || now}`,
+            sourceUpdatedAt: now,
+          });
+          updatedCount++;
+        } else {
+          const key = issData.key || `${targetProj.key}-${nextNum++}`;
+          const newId = `iss-imp-${Date.now()}-${idx}`;
+          const newIssue: Issue = {
+            id: newId,
+            key,
+            projectId: targetProj.id,
+            sprintId: resolvedSprintId,
+            epicId: resolvedEpicId,
+            parentIssueId: null,
+            type: issData.type || 'task',
+            summary: issData.summary,
+            description: issData.description || '',
+            status: issData.status || 'todo',
+            priority: issData.priority || 'medium',
+            resolution: issData.status === 'done' ? 'Done' : null,
+            assigneeId: issData.assigneeId ?? null,
+            reporterId: issData.reporterId || actorId,
+            storyPoints: issData.storyPoints ?? 3,
+            originalEstimateMinutes: issData.originalEstimateMinutes ?? 240,
+            remainingEstimateMinutes:
+              issData.remainingEstimateMinutes ?? issData.originalEstimateMinutes ?? 240,
+            flagged: false,
+            archived: false,
+            startDate: issData.startDate,
+            dueDate: issData.dueDate,
+            team: issData.team,
+            wbsCode: issData.wbsCode,
+            estimatedCost: issData.estimatedCost,
+            actualCost: issData.actualCost,
+            isMilestone: issData.isMilestone,
+            externalKey: issData.externalKey || key,
+            externalUrl: issData.externalUrl,
+            customFields: issData.customFields,
+            watchers: [actorId],
+            labels: issData.labels || [],
+            components: issData.components || [],
+            fixVersionIds: resolvedFixVersionIds,
+            subtasks: [],
+            comments: issData.comments || [],
+            worklogs: [],
+            links: extraLinks,
+            attachments: issData.attachments || [],
+            devLinks: [],
+            history: [
+              {
+                id: `hist-imp-${Date.now()}-${idx}`,
+                authorId: actorId,
+                field: 'imported',
+                fromValue: payload.source,
+                toValue: key,
+                createdAt: now,
+              },
+            ],
+            automationExecutions: [],
+            createdAt: now,
+            updatedAt: now,
+          };
+          nextIssues.unshift(newIssue);
+          issueIdByKey.set(key.toLowerCase(), newId);
+          if (issData._parentKeyHint && !epicLookupByKeyOrName.has(issData._parentKeyHint.toLowerCase())) {
+            pendingParentLinks.push({ childId: newId, parentKey: issData._parentKeyHint });
+          }
+          importedLinks.push({
+            externalEntityType: 'issue',
+            externalEntityId: issData._externalId || key,
+            externalKey: key,
+            externalUrl: issData.externalUrl,
+            localEntityType: 'issue',
+            localEntityId: newId,
+            syncHash: `${issData.summary}:${issData.status}:${now}`,
+            sourceUpdatedAt: now,
+          });
+          createdCount++;
+        }
+      });
+
+      // Second pass: resolve parentIssueId links across newly created + existing items
+      for (const pl of pendingParentLinks) {
+        const parentId = issueIdByKey.get(pl.parentKey.toLowerCase());
+        if (parentId && parentId !== pl.childId) {
+          const child = nextIssues.find(i => i.id === pl.childId);
+          if (child) child.parentIssueId = parentId;
+        }
+      }
+
+      setIssues(nextIssues);
+    }
+
+    // 8. Upsert Confluence / Excel Documents into Target Space Docs with hierarchy & structured blocks
+    if (payload.docs && payload.docs.length > 0) {
+      nextProjects = nextProjects.map(p => {
+        if (p.id !== targetProj.id) return p;
+        const nextDocs: SpaceDocPage[] = [...(p.docs || [])];
+        payload.docs!.forEach((d, idx) => {
+          const foundIdx = nextDocs.findIndex(
+            existing =>
+              (d.externalId && existing.externalId === d.externalId) ||
+              (d.id && existing.id === d.id) ||
+              existing.title.toLowerCase() === d.title.toLowerCase()
+          );
+          if (foundIdx >= 0) {
+            if (policy === 'destination_wins') {
+              skippedCount++;
+              return;
+            }
+            nextDocs[foundIdx] = {
+              ...nextDocs[foundIdx],
+              content: d.content || nextDocs[foundIdx].content,
+              structuredBlocks: d.structuredBlocks || nextDocs[foundIdx].structuredBlocks,
+              conversionWarnings: d.conversionWarnings || nextDocs[foundIdx].conversionWarnings,
+              parentId: d.parentId ?? nextDocs[foundIdx].parentId,
+              ancestors: d.ancestors || nextDocs[foundIdx].ancestors,
+              version: d.version ?? nextDocs[foundIdx].version,
+              sourceUrl: d.sourceUrl || nextDocs[foundIdx].sourceUrl,
+              sourceProvider: d.sourceProvider || nextDocs[foundIdx].sourceProvider,
+              externalId: d.externalId || nextDocs[foundIdx].externalId,
+              labels: d.labels || nextDocs[foundIdx].labels,
+              attachments: d.attachments || nextDocs[foundIdx].attachments,
+              comments: d.comments || nextDocs[foundIdx].comments,
+              updatedAt: d.updatedAt || now,
+            };
+            importedLinks.push({
+              externalEntityType: 'page',
+              externalEntityId: d.externalId || nextDocs[foundIdx].id,
+              externalKey: d.title,
+              externalUrl: d.sourceUrl,
+              localEntityType: 'document',
+              localEntityId: nextDocs[foundIdx].id,
+              syncHash: `${d.title}:v${d.version || 1}`,
+              sourceUpdatedAt: d.updatedAt || now,
+            });
+            updatedCount++;
+          } else {
+            const newDocId = d.id || `doc-imp-${Date.now()}-${idx}`;
+            nextDocs.unshift({
+              id: newDocId,
+              title: d.title,
+              content: d.content,
+              authorId: actorId,
+              createdAt: d.createdAt || d.updatedAt || now,
+              updatedAt: d.updatedAt || now,
+              parentId: d.parentId,
+              ancestors: d.ancestors,
+              version: d.version || 1,
+              sourceUrl: d.sourceUrl,
+              sourceProvider: d.sourceProvider,
+              externalId: d.externalId,
+              labels: d.labels,
+              attachments: d.attachments,
+              comments: d.comments,
+              conversionWarnings: d.conversionWarnings,
+              structuredBlocks: d.structuredBlocks,
+            });
+            importedLinks.push({
+              externalEntityType: 'page',
+              externalEntityId: d.externalId || newDocId,
+              externalKey: d.title,
+              externalUrl: d.sourceUrl,
+              localEntityType: 'document',
+              localEntityId: newDocId,
+              syncHash: `${d.title}:v${d.version || 1}`,
+              sourceUpdatedAt: d.updatedAt || now,
+            });
+            createdCount++;
+          }
+        });
+        return { ...p, docs: nextDocs };
+      });
+    }
+
+    setProjects(nextProjects);
+
+    // 9. Upsert Risks & Milestones
+    if (payload.risks && payload.risks.length > 0) {
+      const nextRisks = [...risks];
+      payload.risks.forEach((rData, idx) => {
+        const existingIdx = nextRisks.findIndex(
+          r =>
+            r.projectId === targetProj.id &&
+            ((rData.key && r.key.toLowerCase() === rData.key.toLowerCase()) ||
+              r.title.toLowerCase() === rData.title.toLowerCase())
+        );
+        if (existingIdx >= 0) {
+          nextRisks[existingIdx] = {
+            ...nextRisks[existingIdx],
+            description: rData.description || nextRisks[existingIdx].description,
+            probability: rData.probability || nextRisks[existingIdx].probability,
+            impact: rData.impact || nextRisks[existingIdx].impact,
+            status: rData.status || nextRisks[existingIdx].status,
+            mitigationPlan: rData.mitigationPlan || nextRisks[existingIdx].mitigationPlan,
+            dueDate: rData.dueDate || nextRisks[existingIdx].dueDate,
+            updatedAt: now,
+          };
+          updatedCount++;
+        } else {
+          nextRisks.unshift({
+            id: `risk-imp-${Date.now()}-${idx}`,
+            projectId: targetProj.id,
+            key: rData.key || `RSK-${nextRisks.length + 1}`,
+            title: rData.title,
+            titleFa: rData.titleFa || rData.title,
+            description: rData.description || '',
+            category: rData.category || 'Technical',
+            probability: rData.probability || 'medium',
+            impact: rData.impact || 'medium',
+            status: rData.status || 'open',
+            ownerId: rData.ownerId || actorId,
+            mitigationPlan: rData.mitigationPlan,
+            dueDate: rData.dueDate,
+            createdAt: now,
+            updatedAt: now,
+          });
+          createdCount++;
+        }
+      });
+      setRisks(nextRisks);
+    }
+
+    if (payload.milestones && payload.milestones.length > 0) {
+      const nextMilestones = [...milestones];
+      payload.milestones.forEach((mData, idx) => {
+        const existingIdx = nextMilestones.findIndex(
+          m => m.projectId === targetProj.id && m.title.toLowerCase() === mData.title.toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          nextMilestones[existingIdx] = {
+            ...nextMilestones[existingIdx],
+            description: mData.description || nextMilestones[existingIdx].description,
+            dueDate: mData.dueDate || nextMilestones[existingIdx].dueDate,
+            status: mData.status || nextMilestones[existingIdx].status,
+          };
+          updatedCount++;
+        } else {
+          nextMilestones.unshift({
+            id: `ms-imp-${Date.now()}-${idx}`,
+            projectId: targetProj.id,
+            title: mData.title,
+            titleFa: mData.titleFa || mData.title,
+            description: mData.description,
+            dueDate: mData.dueDate || now.split('T')[0],
+            status: mData.status || 'upcoming',
+            ownerId: mData.ownerId || actorId,
+          });
+          createdCount++;
+        }
+      });
+      setMilestones(nextMilestones);
+    }
+
+    // 10. Upsert Resources (Users / Teams / Assets)
+    if (payload.users && payload.users.length > 0) {
+      const nextUsers = [...users];
+      payload.users.forEach((uData, idx) => {
+        const existingIdx = nextUsers.findIndex(
+          u => u.email.toLowerCase() === uData.email.toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          nextUsers[existingIdx] = {
+            ...nextUsers[existingIdx],
+            name: uData.name || nextUsers[existingIdx].name,
+            nameFa: uData.nameFa || nextUsers[existingIdx].nameFa,
+            department: uData.department || nextUsers[existingIdx].department,
+            role: uData.role || nextUsers[existingIdx].role,
+          };
+          updatedCount++;
+        } else {
+          const initials =
+            uData.name
+              .split(/\s+/)
+              .map(s => s[0])
+              .join('')
+              .toUpperCase()
+              .slice(0, 2) || 'UR';
+          nextUsers.push({
+            id: `user-imp-${Date.now()}-${idx}`,
+            name: uData.name,
+            nameFa: uData.nameFa || uData.name,
+            email: uData.email,
+            avatar: initials,
+            avatarColor: 'bg-indigo-600',
+            role: uData.role || 'developer',
+            department: uData.department || 'Engineering',
+            status: 'active',
+            joinedDate: now.split('T')[0],
+          });
+          createdCount++;
+        }
+      });
+      setUsers(nextUsers);
+    }
+
+    if (payload.teams && payload.teams.length > 0) {
+      const nextTeams = [...teams];
+      payload.teams.forEach((tm, idx) => {
+        const existingIdx = nextTeams.findIndex(
+          t => t.name.toLowerCase() === tm.name.toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          nextTeams[existingIdx] = {
+            ...nextTeams[existingIdx],
+            description: tm.description || nextTeams[existingIdx].description,
+          };
+          updatedCount++;
+        } else {
+          nextTeams.push({
+            id: `team-imp-${Date.now()}-${idx}`,
+            name: tm.name,
+            nameFa: tm.nameFa || tm.name,
+            description: tm.description || 'Imported team',
+            leadId: actorId,
+            memberIds: [actorId],
+          });
+          createdCount++;
+        }
+      });
+      setTeams(nextTeams);
+    }
+
+    if (payload.assets && payload.assets.length > 0) {
+      const nextAssets = [...assets];
+      payload.assets.forEach((ast, idx) => {
+        const existingIdx = nextAssets.findIndex(
+          a => a.name.toLowerCase() === ast.name.toLowerCase()
+        );
+        if (existingIdx >= 0) {
+          nextAssets[existingIdx] = {
+            ...nextAssets[existingIdx],
+            environment: ast.environment || nextAssets[existingIdx].environment,
+          };
+          updatedCount++;
+        } else {
+          nextAssets.push({
+            id: `ast-imp-${Date.now()}-${idx}`,
+            key: `AST-${nextAssets.length + 101}`,
+            name: ast.name,
+            schema: ast.schema || 'Services',
+            status: 'Active',
+            ownerId: actorId,
+            environment: ast.environment || 'Production',
+            linkedIssueKeys: [],
+          });
+          createdCount++;
+        }
+      });
+      setAssets(nextAssets);
+    }
+
+    setCurrentProjectId(targetProj.id);
+    setAppNotifications(prev => [
+      {
+        id: `notif-imp-${Date.now()}`,
+        title: `Integration sync (${payload.source.toUpperCase()})`,
+        titleFa: `همگام‌سازی یکپارچه‌سازی (${payload.source.toUpperCase()})`,
+        message: `${createdCount} created, ${updatedCount} updated in ${targetProj.key}`,
+        createdAt: now,
+        read: false,
+      },
+      ...prev,
+    ]);
+
+    return {
+      targetProjectId: targetProj.id,
+      targetProjectKey: targetProj.key,
+      createdCount,
+      updatedCount,
+      skippedCount,
+      warnings,
+      importedLinks,
+    };
   };
 
   return (
@@ -1811,6 +2787,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         goals,
         teams,
         assets,
+        risks,
+        milestones,
         siteConfig,
         updateSiteConfig,
 
@@ -1821,6 +2799,10 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateGoalStatus,
         createTeam,
         createAsset,
+        createRisk,
+        updateRiskStatus,
+        createMilestone,
+        updateMilestoneStatus,
 
         workflowViewerIssueId,
         setWorkflowViewerIssueId,
@@ -1882,6 +2864,16 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateEpic,
         createVersion,
         toggleReleaseVersion,
+
+        apiFetch,
+        importIntegrationData,
+        recentExcelImports,
+        addRecentExcelImport,
+        mappingTemplates,
+        saveMappingTemplate,
+        deleteMappingTemplate,
+        syncHistory,
+        addSyncHistoryRecord,
 
         resetToDemoData,
       }}

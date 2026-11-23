@@ -1,3 +1,5 @@
+import { formatJalaliDate } from './jalaliDate';
+
 export type Language = 'fa' | 'en';
 
 export const translations = {
@@ -12,6 +14,7 @@ export const translations = {
     dashboardsView: 'Dashboards',
     assetsView: 'Assets',
     teamsView: 'Teams',
+    integrationsView: 'Integration Center',
     customizeSidebar: 'Customize sidebar',
     jiraAdmin: 'Jira Admin',
     personalSettings: 'Personal Settings',
@@ -300,6 +303,7 @@ export const translations = {
     dashboardsView: 'داشبوردها (Dashboards)',
     assetsView: 'دارایی‌ها و CMDB (Assets)',
     teamsView: 'تیم‌ها (Teams)',
+    integrationsView: 'مرکز یکپارچه‌سازی و ورود داده',
     customizeSidebar: 'سفارشی‌سازی منو',
     jiraAdmin: 'مدیریت سامانه (Jira Admin)',
     personalSettings: 'تنظیمات شخصی',
@@ -589,3 +593,33 @@ export function formatMinutes(minutes?: number, lang: Language = 'en'): string {
   if (h > 0) return `${h}${hStr}`;
   return `${m}${mStr}`;
 }
+
+const PERSIAN_DIGITS = ['۰', '۱', '۲', '۳', '۴', '۵', '۶', '۷', '۸', '۹'];
+
+export function toPersianDigits(input: string | number): string {
+  return String(input).replace(/\d/g, d => PERSIAN_DIGITS[Number(d)] ?? d);
+}
+
+export function formatLocalizedNumber(val: number | string, lang: Language): string {
+  return lang === 'fa' ? toPersianDigits(val) : String(val);
+}
+
+export function formatLocalizedDateTime(iso: string | null | undefined, lang: Language): string {
+  if (!iso) return lang === 'fa' ? 'همگام‌سازی نشده' : 'Never synced';
+  const dt = new Date(iso);
+  if (Number.isNaN(dt.getTime())) return String(iso);
+  if (lang === 'fa') {
+    const jDate = formatJalaliDate(dt, true);
+    const hh = String(dt.getHours()).padStart(2, '0');
+    const mm = String(dt.getMinutes()).padStart(2, '0');
+    return `${jDate} · ${toPersianDigits(`${hh}:${mm}`)}`;
+  }
+  return dt.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+

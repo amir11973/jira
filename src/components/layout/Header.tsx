@@ -21,6 +21,7 @@ import {
   GanttChart,
   Megaphone,
   UserCog,
+  Plug,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { IssueTypeIcon, UserAvatar } from '../common/JiraIcons';
@@ -159,6 +160,7 @@ export const Header: React.FC = () => {
                   { id: 'dashboards' as const, label: 'Analytics & Dashboards', labelFa: 'داشبوردها و تحلیل', icon: LayoutDashboard, color: 'bg-emerald-600' },
                   { id: 'assets' as const, label: 'Assets & CMDB', labelFa: 'دارایی‌ها (Assets)', icon: Database, color: 'bg-amber-600' },
                   { id: 'teams' as const, label: 'Teams Directory', labelFa: 'تیم‌ها و اعضا', icon: Users, color: 'bg-purple-600' },
+                  { id: 'integrations' as const, label: 'Integration Center', labelFa: 'مرکز یکپارچه‌سازی', icon: Plug, color: 'bg-cyan-600' },
                 ].map(item => {
                   const Icon = item.icon;
                   return (
@@ -451,6 +453,16 @@ export const Header: React.FC = () => {
                   >
                     <Users className="w-3.5 h-3.5 text-purple-600" />
                     <span>{t.userManagement}</span>
+                  </button>
+                  <button
+                    onClick={() => {
+                      setActiveView('integrations');
+                      setGearMenuOpen(false);
+                    }}
+                    className="w-full flex items-center gap-2 px-2.5 py-2 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-start text-slate-700 dark:text-slate-200 font-medium"
+                  >
+                    <Plug className="w-3.5 h-3.5 text-cyan-600" />
+                    <span>{t.integrationsView}</span>
                   </button>
                 </div>
               </div>

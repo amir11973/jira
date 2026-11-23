@@ -20,6 +20,7 @@ import {
   Search,
   Settings,
   AlignLeft,
+  Plug,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { GlobalSidebarItemKey } from '../../types/jira';
@@ -111,6 +112,7 @@ export const Sidebar: React.FC = () => {
     { key: 'dashboards', label: t.dashboardsView },
     { key: 'assets', label: t.assetsView },
     { key: 'teams', label: t.teamsView },
+    { key: 'integrations', label: t.integrationsView },
   ];
 
   const defaultFiltersList = [
@@ -667,6 +669,25 @@ export const Sidebar: React.FC = () => {
                 </button>
               )}
             </div>
+          )}
+
+          {/* Integration Center */}
+          {isVisible('integrations') && (
+            <button
+              onClick={() => {
+                setActivePopover('none');
+                setActiveView('integrations');
+              }}
+              title={t.integrationsView}
+              className={`w-full flex items-center gap-2.5 px-2.5 py-2 rounded-md font-medium transition-colors ${
+                activeView === 'integrations'
+                  ? 'bg-blue-100/70 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 font-semibold'
+                  : 'text-slate-700 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800'
+              } ${sidebarCollapsed ? 'justify-center px-0' : ''}`}
+            >
+              <Plug className="w-4 h-4 shrink-0 text-blue-600" />
+              {!sidebarCollapsed && <span className="truncate flex-1 text-start">{t.integrationsView}</span>}
+            </button>
           )}
 
           {/* Administration Shortcuts */}

@@ -11,6 +11,7 @@ import {
   Search,
   Lock,
   ArrowUpRight,
+  Plug,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { globalFieldCatalog, initialLegacyWorkflows } from '../../data/mockData';
@@ -76,24 +77,34 @@ export const JiraAdminView: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex flex-wrap gap-1 bg-slate-200/70 dark:bg-slate-800/80 p-1 rounded-lg text-xs">
-          {tabs.map(tab => {
-            const Icon = tab.icon;
-            return (
-              <button
-                key={tab.id}
-                onClick={() => setActiveAdminTab(tab.id)}
-                className={`px-3 py-1.5 rounded-md font-semibold flex items-center gap-1.5 transition-colors ${
-                  activeAdminTab === tab.id
-                    ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
-                    : 'text-slate-600 dark:text-slate-400'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                <span>{language === 'fa' ? tab.labelFa : tab.label}</span>
-              </button>
-            );
-          })}
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            onClick={() => setActiveView('integrations')}
+            className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs flex items-center gap-1.5 shadow-xs"
+          >
+            <Plug className="w-3.5 h-3.5" />
+            <span>{t.integrationsView}</span>
+          </button>
+
+          <div className="flex flex-wrap gap-1 bg-slate-200/70 dark:bg-slate-800/80 p-1 rounded-lg text-xs">
+            {tabs.map(tab => {
+              const Icon = tab.icon;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveAdminTab(tab.id)}
+                  className={`px-3 py-1.5 rounded-md font-semibold flex items-center gap-1.5 transition-colors ${
+                    activeAdminTab === tab.id
+                      ? 'bg-white dark:bg-slate-900 text-blue-600 dark:text-blue-400 shadow-xs'
+                      : 'text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{language === 'fa' ? tab.labelFa : tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 

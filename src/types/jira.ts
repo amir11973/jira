@@ -189,6 +189,13 @@ export interface Issue {
   devLinks?: DevLinkItem[];
   history?: HistoryEntry[];
   automationExecutions?: AutomationExecution[];
+  wbsCode?: string;
+  estimatedCost?: number;
+  actualCost?: number;
+  isMilestone?: boolean;
+  externalKey?: string;
+  externalUrl?: string;
+  customFields?: Record<string, string | number | boolean>;
   createdAt: string;
   updatedAt: string;
 }
@@ -249,12 +256,52 @@ export interface SpaceShortcut {
   url: string;
 }
 
+export type DocStructuredBlock =
+  | { type: 'heading'; level: number; text: string }
+  | { type: 'paragraph'; text: string }
+  | { type: 'list'; ordered: boolean; items: string[] }
+  | { type: 'table'; headers: string[]; rows: string[][] }
+  | { type: 'code'; language?: string; code: string }
+  | { type: 'quote'; text: string }
+  | { type: 'image'; alt: string; url: string }
+  | { type: 'macro_warning'; macroName: string; fallbackText: string };
+
+export interface DocAttachmentMeta {
+  id: string;
+  name: string;
+  size: string;
+  mimeType: string;
+  downloadUrl?: string;
+}
+
+export interface DocCommentMeta {
+  id: string;
+  author: string;
+  authorName?: string;
+  text: string;
+  content?: string;
+  createdAt: string;
+}
+
 export interface SpaceDocPage {
   id: string;
   title: string;
   content: string;
   authorId: string;
+  authorName?: string;
+  createdAt?: string;
   updatedAt: string;
+  parentId?: string | null;
+  ancestors?: Array<{ id: string; title: string }>;
+  version?: number;
+  sourceUrl?: string;
+  sourceProvider?: 'confluence' | 'excel' | 'local';
+  externalId?: string;
+  labels?: string[];
+  attachments?: DocAttachmentMeta[];
+  comments?: DocCommentMeta[];
+  conversionWarnings?: string[];
+  structuredBlocks?: DocStructuredBlock[];
 }
 
 export interface SpacePolicy {
@@ -263,6 +310,42 @@ export interface SpacePolicy {
   titleFa: string;
   description: string;
   enabled: boolean;
+}
+
+export interface RiskItem {
+  id: string;
+  projectId: string;
+  key: string;
+  title: string;
+  titleFa?: string;
+  description: string;
+  category?: string;
+  probability: 'low' | 'medium' | 'high' | 'critical';
+  impact: 'low' | 'medium' | 'high' | 'critical';
+  score?: number;
+  status: 'open' | 'mitigating' | 'closed';
+  ownerId: string;
+  mitigationPlan?: string;
+  dueDate?: string;
+  costImpact?: number;
+  linkedIssueKey?: string;
+  externalId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MilestoneItem {
+  id: string;
+  projectId: string;
+  title: string;
+  titleFa?: string;
+  description?: string;
+  dueDate: string;
+  status: 'planned' | 'on_track' | 'at_risk' | 'achieved' | 'upcoming' | 'completed';
+  ownerId: string;
+  epicId?: string;
+  wbsCode?: string;
+  externalId?: string;
 }
 
 export interface Project {
@@ -276,6 +359,9 @@ export interface Project {
   category: string;
   template?: 'scrum' | 'kanban' | 'business' | 'work_requests' | 'it_service' | 'personal';
   starred?: boolean;
+  budgetAllocated?: number;
+  budgetSpent?: number;
+  currency?: string;
   enabledTabs?: SpaceTabId[];
   shortcuts?: SpaceShortcut[];
   docs?: SpaceDocPage[];
@@ -434,7 +520,8 @@ export type GlobalSidebarItemKey =
   | 'filters'
   | 'dashboards'
   | 'assets'
-  | 'teams';
+  | 'teams'
+  | 'integrations';
 
 export type ViewType =
   | 'for_you'
@@ -444,6 +531,7 @@ export type ViewType =
   | 'dashboards'
   | 'assets'
   | 'teams'
+  | 'integrations'
   | 'summary'
   | 'board'
   | 'list'
@@ -482,4 +570,371 @@ export type QuickCreateModalType =
   | 'create_plan'
   | 'create_dashboard'
   | 'create_team';
+
+// ======================== INTEGRATION CENTER TYPES ========================
+
+export type IntegrationSource = 'jira' | 'confluence' | 'excel';
+
+export type IntegrationAuthMethod = 'api_token' | 'pat' | 'basic' | 'oauth_bearer';
+
+export type DestinationModule =
+  | 'work_items'
+  | 'epics'
+  | 'projects'
+  | 'documents'
+  | 'resources'
+  | 'schedules'
+  | 'wbs'
+  | 'risks'
+  | 'budgets'
+  | 'milestones';
+
+export type ConflictPolicy = 'source_wins' | 'destination_wins' | 'manual_review';
+export type ExcelTemplateType = 'project' | 'task' | 'wbs' | 'resource' | 'risk' | 'all';
+
+export type DetectedFieldType =
+  | 'text'
+  | 'number'
+  | 'date'
+  | 'email'
+  | 'boolean'
+  | 'status'
+  | 'list';
+
+export type TransformationType =
+  | 'direct'
+  | 'rich_text'
+  | 'user_lookup'
+  | 'date_normalize'
+  | 'status_map'
+  | 'priority_normalize'
+  | 'number_parse'
+  | 'list_split'
+  | 'constant';
+
+export interface SourceFieldMeta {
+  key: string;
+  label: string;
+  type: DetectedFieldType;
+  sampleValue?: string;
+}
+
+export interface DestinationFieldDef {
+  id: string;
+  label: string;
+  labelFa: string;
+  required: boolean;
+  expectedType: DetectedFieldType;
+  allowedTransforms: TransformationType[];
+}
+
+export interface FieldMappingRule {
+  id: string;
+  sourceKey: string;
+  sourceLabel: string;
+  sourceType: DetectedFieldType;
+  destinationField: string; // '__ignore__' | '__custom_label__' | '__custom_field__' | field id
+  transformation: TransformationType;
+  defaultValue: string;
+  required: boolean;
+}
+
+export interface MappingTemplate {
+  id: string;
+  name: string;
+  source: IntegrationSource;
+  destinationModule: DestinationModule;
+  mappings: FieldMappingRule[];
+  statusMap: Record<string, string>;
+  updatedAt: string;
+}
+
+export interface RemoteProjectOrSpace {
+  id: string;
+  key: string;
+  name: string;
+  type?: string;
+  description?: string;
+}
+
+export interface IntegrationConnectionSummary {
+  id: string;
+  organizationId?: string;
+  provider: 'jira' | 'confluence';
+  serverUrl: string;
+  authMethod: IntegrationAuthMethod;
+  email?: string;
+  username?: string;
+  maskedIdentity: string;
+  connected: boolean;
+  healthStatus?: 'healthy' | 'degraded' | 'unreachable' | 'needs_reauth';
+  healthMessage?: string;
+  lastHealthCheckAt?: string | null;
+  account: {
+    accountId: string;
+    displayName: string;
+    email: string;
+    avatarUrl?: string;
+  };
+  projectsOrSpaces: RemoteProjectOrSpace[];
+  connectedAt: string;
+  lastSyncedAt: string | null;
+}
+
+export interface CellValidationIssue {
+  rowIndex: number;
+  columnKey: string;
+  severity: 'error' | 'warning';
+  messageEn: string;
+  messageFa: string;
+}
+
+export interface ExcelParsedSheet {
+  name: string;
+  headerRowUsed: number;
+  detectedHeaderRow: number;
+  rowCount: number;
+  duplicateKeys: string[];
+  columns: SourceFieldMeta[];
+  rows: Array<Record<string, unknown>>;
+  rawPreviewMatrix: string[][];
+}
+
+export interface ExcelParsedWorkbook {
+  fileName: string;
+  detectedFormat: 'XLSX' | 'CSV';
+  detectedEncoding?: string;
+  sheetCount: number;
+  sheets: ExcelParsedSheet[];
+}
+
+export interface RecentExcelImport {
+  id: string;
+  fileName: string;
+  format: string;
+  sheetName: string;
+  destinationModule: DestinationModule;
+  targetSpaceKey: string;
+  createdCount: number;
+  updatedCount: number;
+  timestamp: string;
+}
+
+export interface IntegrationSyncRecord {
+  id: string;
+  provider: IntegrationSource;
+  status: 'success' | 'partial' | 'failed';
+  sourceLabel: string;
+  targetSpaceKey: string;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  errorMessage?: string;
+  timestamp: string;
+}
+
+export interface IntegrationConfigRecord {
+  id: string;
+  organizationId: string;
+  connectionId: string;
+  provider: IntegrationSource;
+  name: string;
+  targetProjectId: string;
+  destinationModule: DestinationModule;
+  sourceScopes: string[];
+  jqlOrCqlFilter?: string;
+  syncMode: 'manual' | 'scheduled';
+  syncIntervalMinutes: number;
+  conflictPolicy: ConflictPolicy;
+  lastCheckpointCursor?: string;
+  lastSuccessfulSyncAt?: string | null;
+  enabled: boolean;
+  updatedAt: string;
+}
+
+export interface IntegrationJobItemRecord {
+  id: string;
+  jobId: string;
+  externalEntityType: string;
+  externalEntityId: string;
+  externalKey: string;
+  localEntityType?: string;
+  localEntityId?: string;
+  action: 'create' | 'update' | 'skip' | 'conflict' | 'fail' | 'missing_in_source';
+  status: 'pending' | 'succeeded' | 'failed' | 'conflict';
+  rowNumber?: number;
+  cellErrors?: CellValidationIssue[];
+  errorMessage?: string;
+  payloadSnapshot?: Record<string, unknown>;
+  syncHash?: string;
+  sourceUpdatedAt?: string;
+}
+
+export interface IntegrationJobRecord {
+  id: string;
+  organizationId: string;
+  configId?: string;
+  connectionId?: string;
+  provider: IntegrationSource;
+  mode: 'full' | 'incremental';
+  status: 'queued' | 'running' | 'paused' | 'completed' | 'partial' | 'failed' | 'cancelled';
+  sourceLabel: string;
+  targetSpaceKey: string;
+  destinationModule: DestinationModule;
+  totalItems: number;
+  processedItems: number;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  failedCount: number;
+  conflictCount: number;
+  checkpointCursor?: string;
+  attemptCount: number;
+  maxAttempts: number;
+  nextRetryAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  errorSummary?: string;
+  createdAt: string;
+  items?: IntegrationJobItemRecord[];
+}
+
+export interface IntegrationExternalLinkRecord {
+  id: string;
+  organizationId: string;
+  provider: IntegrationSource;
+  connectionId: string;
+  externalEntityType: string;
+  externalEntityId: string;
+  externalKey: string;
+  externalUrl?: string;
+  localEntityType: string;
+  localEntityId: string;
+  localProjectId?: string;
+  syncHash: string;
+  sourceRevision?: string;
+  sourceUpdatedAt?: string;
+  localUpdatedAt?: string;
+  missingInSource?: boolean;
+  lastSyncedAt: string;
+}
+
+export interface IntegrationConflictDiff {
+  field: string;
+  sourceValue: unknown;
+  localValue: unknown;
+  chosen?: 'source' | 'destination';
+}
+
+export interface IntegrationConflictRecord {
+  id: string;
+  organizationId: string;
+  jobId: string;
+  configId?: string;
+  externalLinkId?: string;
+  provider: IntegrationSource;
+  entityType: string;
+  externalKey: string;
+  localEntityId: string;
+  fieldDiffs: IntegrationConflictDiff[];
+  sourceSnapshot: Record<string, unknown>;
+  localSnapshot: Record<string, unknown>;
+  status: 'pending' | 'resolved_source' | 'resolved_destination' | 'resolved_merged' | 'dismissed';
+  resolvedBy?: string;
+  resolvedAt?: string;
+  createdAt: string;
+}
+
+export interface IntegrationAuditLogRecord {
+  id: string;
+  organizationId: string;
+  actorUserId: string;
+  actorRole: string;
+  provider: IntegrationSource | 'system';
+  action: string;
+  resourceType: string;
+  resourceId?: string;
+  status: 'success' | 'warning' | 'failed';
+  summary: string;
+  metadata?: Record<string, unknown>;
+  createdAt: string;
+}
+
+export interface IntegrationImportPayload {
+  source: IntegrationSource;
+  destinationModule: DestinationModule;
+  targetProjectId?: string;
+  conflictPolicy?: ConflictPolicy;
+  createNewSpace?: {
+    key: string;
+    name: string;
+    nameFa?: string;
+    description?: string;
+    template?: 'scrum' | 'kanban' | 'business';
+  };
+  missingStatusesToAdd?: Array<{
+    id: string;
+    name: string;
+    nameFa: string;
+    category: StatusCategory;
+  }>;
+  projects?: Array<Partial<Project> & { key: string; name: string }>;
+  epics?: Array<Partial<Epic> & { name: string }>;
+  sprints?: Array<Partial<Sprint> & { name: string }>;
+  versions?: Array<{ name: string; description?: string; releaseDate?: string; isReleased?: boolean }>;
+  issues?: Array<
+    Partial<Issue> & {
+      summary: string;
+      _sprintHint?: string;
+      _epicHint?: string;
+      _parentKeyHint?: string;
+      _versionNamesHint?: string[];
+      _dependencyHint?: string;
+      _externalId?: string;
+    }
+  >;
+  docs?: Array<
+    Partial<SpaceDocPage> & {
+      title: string;
+      content: string;
+      authorEmailOrName?: string;
+      _parentExternalId?: string;
+      _parentTitle?: string;
+    }
+  >;
+  users?: Array<Partial<User> & { name: string; email: string }>;
+  teams?: Array<Partial<TeamEntity> & { name: string }>;
+  assets?: Array<Partial<AssetEntity> & { name: string }>;
+  risks?: Array<Partial<RiskItem> & { title: string }>;
+  milestones?: Array<Partial<MilestoneItem> & { title: string }>;
+  budgets?: Array<{
+    projectKey?: string;
+    projectName?: string;
+    allocated?: number;
+    spent?: number;
+    currency?: string;
+  }>;
+}
+
+export interface IntegrationImportResult {
+  targetProjectId: string;
+  targetProjectKey: string;
+  createdCount: number;
+  updatedCount: number;
+  skippedCount: number;
+  conflictCount?: number;
+  warnings: string[];
+  importedLinks?: Array<{
+    externalEntityType: string;
+    externalEntityId: string;
+    externalKey: string;
+    externalUrl?: string;
+    localEntityType: string;
+    localEntityId: string;
+    syncHash: string;
+    sourceUpdatedAt?: string;
+  }>;
+}
+
+
 

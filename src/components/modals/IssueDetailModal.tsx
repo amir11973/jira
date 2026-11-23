@@ -26,7 +26,7 @@ import {
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { IssueTypeIcon, PriorityIcon, UserAvatar } from '../common/JiraIcons';
-import { formatMinutes } from '../../utils/i18n';
+import { formatLocalizedDateTime, formatMinutes } from '../../utils/i18n';
 import { LogWorkModal } from './LogWorkModal';
 import { IssueLink, IssueType, Priority, ResolutionType } from '../../types/jira';
 import { getAvailableTransitions } from '../../utils/workflowEngine';
@@ -1493,18 +1493,99 @@ export const IssueDetailModal: React.FC = () => {
                   <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
                     {t.team}
                   </label>
-                  <input
-                    type="text"
-                    value={issue.team || ''}
-                    onChange={e => updateIssue(issue.id, { team: e.target.value })}
-                    placeholder="Core Platform"
-                    className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
-                  />
+                    <input
+                      type="text"
+                      value={issue.team || ''}
+                      onChange={e => updateIssue(issue.id, { team: e.target.value })}
+                      placeholder="Core Platform"
+                      className="w-full px-2 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
+                    />
+                  </div>
                 </div>
-              </div>
+
+                {/* WBS Code & Costs */}
+                <div className="grid grid-cols-3 gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      WBS
+                    </label>
+                    <input
+                      type="text"
+                      value={issue.wbsCode || ''}
+                      onChange={e => updateIssue(issue.id, { wbsCode: e.target.value || undefined })}
+                      placeholder="1.1.2"
+                      className="w-full px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      {language === 'fa' ? 'برآورد هزینه' : 'Est. Cost'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={issue.estimatedCost ?? ''}
+                      onChange={e =>
+                        updateIssue(issue.id, {
+                          estimatedCost: e.target.value === '' ? undefined : Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1">
+                      {language === 'fa' ? 'هزینه واقعی' : 'Actual Cost'}
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={issue.actualCost ?? ''}
+                      onChange={e =>
+                        updateIssue(issue.id, {
+                          actualCost: e.target.value === '' ? undefined : Number(e.target.value),
+                        })
+                      }
+                      className="w-full px-2 py-1 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono text-[11px]"
+                    />
+                  </div>
+                </div>
+
+                {/* Imported Custom Fields & External Source Link */}
+                {issue.customFields && Object.keys(issue.customFields).length > 0 && (
+                  <div className="pt-2 border-t border-slate-100 dark:border-slate-800 space-y-1">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                      {language === 'fa' ? 'فیلدهای سفارشی (Custom Fields)' : 'Custom Fields'}
+                    </div>
+                    <div className="grid grid-cols-1 gap-1">
+                      {Object.entries(issue.customFields).map(([cfKey, cfVal]) => (
+                        <div key={cfKey} className="flex items-center justify-between text-[11px] px-2 py-1 rounded bg-slate-50 dark:bg-slate-800/60">
+                          <span className="text-slate-500 truncate">{cfKey}</span>
+                          <span className="font-mono font-medium text-slate-800 dark:text-slate-200">{String(cfVal)}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
-              </div>
+
+                {issue.externalUrl && /^https?:/i.test(issue.externalUrl) && (
+                  <div className="pt-1">
+                    <a
+                      href={issue.externalUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-[11px] text-blue-600 dark:text-blue-400 hover:underline inline-flex items-center gap-1"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>
+                        {language === 'fa' ? 'مشاهده در سیستم مبدا' : 'Open in Source System'} ({issue.externalKey || issue.key})
+                      </span>
+                    </a>
+                  </div>
+                )}
+                    </div>
+                  )}
+                </div>
 
               {/* Time Tracking Widget */}
               <div className="p-3 bg-white dark:bg-slate-800 rounded-lg border border-slate-200 dark:border-slate-700 space-y-2">
@@ -1638,8 +1719,12 @@ export const IssueDetailModal: React.FC = () => {
 
               {/* Dates */}
               <div className="pt-2 border-t border-slate-200 dark:border-slate-700 text-[10px] text-slate-400 space-y-1 font-mono">
-                <div>Created: {new Date(issue.createdAt).toLocaleString()}</div>
-                <div>Updated: {new Date(issue.updatedAt).toLocaleString()}</div>
+                <div>
+                  {language === 'fa' ? 'ایجاد:' : 'Created:'} {formatLocalizedDateTime(issue.createdAt, language)}
+                </div>
+                <div>
+                  {language === 'fa' ? 'به‌روزرسانی:' : 'Updated:'} {formatLocalizedDateTime(issue.updatedAt, language)}
+                </div>
               </div>
             </div>
           </div>

@@ -37,6 +37,7 @@ import { LoginView } from './components/auth/LoginView';
 import { CreateIssueModal } from './components/modals/CreateIssueModal';
 import { IssueDetailModal } from './components/modals/IssueDetailModal';
 import { QuickCreateModals } from './components/modals/QuickCreateModals';
+import { IntegrationCenterView } from './components/integrations/IntegrationCenterView';
 import { ViewType } from './types/jira';
 
 const SPACE_SCOPED_VIEWS: ViewType[] = [
@@ -83,6 +84,7 @@ const MainLayout: React.FC = () => {
           {activeView === 'dashboards' && <DashboardsView />}
           {activeView === 'assets' && <AssetsView />}
           {activeView === 'teams' && <TeamsView />}
+          {activeView === 'integrations' && <IntegrationCenterView />}
           {activeView === 'summary' && <SummaryView />}
           {activeView === 'board' && <BoardView />}
           {activeView === 'list' && <SpaceListView />}

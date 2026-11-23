@@ -256,8 +256,7 @@ export const QuickCreateModals: React.FC = () => {
             <button
               onClick={() => {
                 closeModal();
-                setActiveView('spaces');
-                showToast('info', language === 'fa' ? 'از اینجا می‌توانید فضای جدید ایجاد یا مدیریت کنید.' : 'Manage or import spaces from the directory.');
+                setActiveView('integrations');
               }}
               className="w-full text-start px-3 py-2 rounded-md font-medium text-slate-700 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-slate-800 flex items-center gap-2"
             >

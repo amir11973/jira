@@ -17,8 +17,13 @@ import {
   ChevronLeft,
   ChevronRight,
   FolderGit2,
+  AlertTriangle,
+  MessageSquare,
+  Tag,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
+import { SpaceDocPage } from '../../types/jira';
+import { formatLocalizedDateTime, formatLocalizedNumber } from '../../utils/i18n';
 import { IssueTypeIcon, UserAvatar } from '../common/JiraIcons';
 
 /* 1. Development & Delivery Metrics (P08, F31, F56) */
@@ -227,16 +232,61 @@ export const DevelopmentView: React.FC = () => {
   );
 };
 
-/* 2. Space Docs / Pages (P10, F55) */
+/* 2. Space Docs / Pages (P10, F55, Confluence Rich Knowledge Base) */
 export const DocsView: React.FC = () => {
   const { currentProject, createSpaceDoc, updateSpaceDoc, users, language, t } = useJira();
   const docs = currentProject.docs || [];
   const [selectedDocId, setSelectedDocId] = useState<string>(docs[0]?.id || '');
   const [isCreating, setIsCreating] = useState(false);
+  const [isEditingDoc, setIsEditingDoc] = useState(false);
   const [newTitle, setNewTitle] = useState('');
   const [newContent, setNewContent] = useState('');
 
   const activeDoc = docs.find(d => d.id === selectedDocId) || docs[0];
+  const docById = new Map(docs.map(d => [d.id, d]));
+
+  const rootDocs = docs.filter(d => !d.parentId || !docById.has(d.parentId));
+  const childrenByParent = new Map<string, SpaceDocPage[]>();
+  docs.forEach(d => {
+    if (d.parentId && docById.has(d.parentId)) {
+      const list = childrenByParent.get(d.parentId) || [];
+      list.push(d);
+      childrenByParent.set(d.parentId, list);
+    }
+  });
+
+  const renderTreeNodes = (nodes: SpaceDocPage[], depth = 0): React.ReactNode =>
+    nodes.map(doc => {
+      const children = childrenByParent.get(doc.id) || [];
+      return (
+        <div key={doc.id} className="space-y-0.5">
+          <button
+            onClick={() => {
+              setSelectedDocId(doc.id);
+              setIsCreating(false);
+              setIsEditingDoc(false);
+            }}
+            style={{ paddingInlineStart: `${10 + depth * 14}px` }}
+            className={`w-full text-start pe-2.5 py-2 rounded-md font-medium truncate flex items-center justify-between gap-1.5 ${
+              activeDoc?.id === doc.id && !isCreating
+                ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-semibold'
+                : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
+            }`}
+          >
+            <span className="truncate">
+              {depth > 0 ? '↳ ' : ''}
+              {doc.title}
+            </span>
+            {doc.version && doc.version > 1 && (
+              <span className="text-[10px] font-mono text-slate-400 shrink-0">
+                v{formatLocalizedNumber(doc.version, language)}
+              </span>
+            )}
+          </button>
+          {children.length > 0 && depth < 5 && renderTreeNodes(children, depth + 1)}
+        </div>
+      );
+    });
 
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
@@ -249,12 +299,15 @@ export const DocsView: React.FC = () => {
 
   return (
     <div className="flex-1 flex h-full overflow-hidden bg-slate-50/50 dark:bg-slate-950">
-      {/* Pages List Sidebar */}
-      <div className="w-64 border-e border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col">
+      {/* Hierarchical Pages Tree Sidebar */}
+      <div className="w-72 border-e border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 flex flex-col">
         <div className="p-3 border-b border-slate-200 dark:border-slate-800 flex items-center justify-between">
           <span className="text-xs font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1.5">
             <FileText className="w-4 h-4 text-blue-600" />
             <span>{t.docsView}</span>
+            <span className="text-[11px] font-mono text-slate-400 tabular-nums">
+              ({formatLocalizedNumber(docs.length, language)})
+            </span>
           </span>
           <button
             onClick={() => setIsCreating(true)}
@@ -270,27 +323,12 @@ export const DocsView: React.FC = () => {
               {language === 'fa' ? 'هنوز مستندی ثبت نشده است.' : 'No docs yet for this space.'}
             </div>
           ) : (
-            docs.map(doc => (
-              <button
-                key={doc.id}
-                onClick={() => {
-                  setSelectedDocId(doc.id);
-                  setIsCreating(false);
-                }}
-                className={`w-full text-start px-2.5 py-2 rounded-md font-medium truncate ${
-                  activeDoc?.id === doc.id && !isCreating
-                    ? 'bg-blue-50 dark:bg-blue-950/50 text-blue-700 dark:text-blue-300 font-semibold'
-                    : 'text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-800'
-                }`}
-              >
-                {doc.title}
-              </button>
-            ))
+            renderTreeNodes(rootDocs)
           )}
         </div>
       </div>
 
-      {/* Document Editor / Reader */}
+      {/* Document Reader / Safe Structured Renderer / Editor */}
       <div className="flex-1 overflow-y-auto p-6">
         {isCreating ? (
           <form onSubmit={handleCreate} className="max-w-3xl space-y-4 text-xs">
@@ -322,25 +360,264 @@ export const DocsView: React.FC = () => {
             </div>
           </form>
         ) : activeDoc ? (
-          <div className="max-w-3xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-4">
-            <div className="border-b border-slate-100 dark:border-slate-800 pb-3">
-              <input
-                type="text"
-                value={activeDoc.title}
-                onChange={e => updateSpaceDoc(currentProject.id, activeDoc.id, e.target.value, activeDoc.content)}
-                className="w-full text-lg font-bold bg-transparent focus:outline-none text-slate-900 dark:text-white"
-              />
-              <div className="text-[11px] font-mono text-slate-400 mt-1">
-                Updated {new Date(activeDoc.updatedAt).toLocaleString()} · Author:{' '}
-                {users.find(u => u.id === activeDoc.authorId)?.name || 'Team'}
+          <div className="max-w-4xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-6 space-y-5">
+            {/* Breadcrumb Ancestors & Metadata Header */}
+            <div className="border-b border-slate-100 dark:border-slate-800 pb-4 space-y-2">
+              {activeDoc.ancestors && activeDoc.ancestors.length > 0 && (
+                <div className="flex items-center gap-1.5 text-[11px] text-slate-400 flex-wrap">
+                  {activeDoc.ancestors.map((anc, idx) => (
+                    <React.Fragment key={`${anc.id}-${idx}`}>
+                      <span>{anc.title}</span>
+                      <span>/</span>
+                    </React.Fragment>
+                  ))}
+                  <span className="text-slate-600 dark:text-slate-300 font-medium">{activeDoc.title}</span>
+                </div>
+              )}
+
+              <div className="flex items-start justify-between gap-3">
+                <input
+                  type="text"
+                  value={activeDoc.title}
+                  onChange={e => updateSpaceDoc(currentProject.id, activeDoc.id, e.target.value, activeDoc.content)}
+                  className="flex-1 text-lg font-bold bg-transparent focus:outline-none text-slate-900 dark:text-white"
+                />
+                <div className="flex items-center gap-2 shrink-0">
+                  {activeDoc.sourceUrl && /^https?:/i.test(activeDoc.sourceUrl) && (
+                    <a
+                      href={activeDoc.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="px-2.5 py-1 text-[11px] font-semibold rounded border border-slate-200 dark:border-slate-700 text-blue-600 dark:text-blue-400 hover:bg-slate-50 dark:hover:bg-slate-800 inline-flex items-center gap-1 whitespace-nowrap"
+                    >
+                      <ExternalLink className="w-3 h-3" />
+                      <span>{language === 'fa' ? 'منبع اصلی' : 'Source Page'}</span>
+                    </a>
+                  )}
+                  {activeDoc.structuredBlocks && activeDoc.structuredBlocks.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setIsEditingDoc(prev => !prev)}
+                      className="px-2.5 py-1 text-[11px] font-semibold rounded border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-slate-800 whitespace-nowrap"
+                    >
+                      {isEditingDoc
+                        ? language === 'fa'
+                          ? 'نمای ساختاریافته'
+                          : 'Rich Reader'
+                        : language === 'fa'
+                        ? 'ویرایش متن'
+                        : 'Edit Markdown'}
+                    </button>
+                  )}
+                </div>
               </div>
+
+              <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono text-slate-400">
+                <span>
+                  {language === 'fa' ? 'به‌روزرسانی:' : 'Updated:'}{' '}
+                  {formatLocalizedDateTime(activeDoc.updatedAt, language)}
+                </span>
+                <span>·</span>
+                <span>
+                  {language === 'fa' ? 'نویسنده:' : 'Author:'}{' '}
+                  {users.find(u => u.id === activeDoc.authorId)?.[language === 'fa' ? 'nameFa' : 'name'] || 'Team'}
+                </span>
+                {activeDoc.version && (
+                  <>
+                    <span>·</span>
+                    <span className="tabular-nums">
+                      {language === 'fa' ? 'نسخه' : 'Version'} {formatLocalizedNumber(activeDoc.version, language)}
+                    </span>
+                  </>
+                )}
+                {activeDoc.sourceProvider && (
+                  <>
+                    <span>·</span>
+                    <span className="uppercase text-slate-500">{activeDoc.sourceProvider}</span>
+                  </>
+                )}
+              </div>
+
+              {activeDoc.labels && activeDoc.labels.length > 0 && (
+                <div className="flex items-center gap-1.5 flex-wrap pt-1 text-[11px] text-slate-500">
+                  <Tag className="w-3 h-3 text-slate-400" />
+                  {activeDoc.labels.map((lbl, idx) => (
+                    <span key={`${lbl}-${idx}`} className="px-1.5 py-0.5 rounded bg-slate-100 dark:bg-slate-800 font-mono">
+                      {lbl}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
-            <textarea
-              rows={12}
-              value={activeDoc.content}
-              onChange={e => updateSpaceDoc(currentProject.id, activeDoc.id, activeDoc.title, e.target.value)}
-              className="w-full text-xs leading-relaxed bg-transparent focus:outline-none text-slate-700 dark:text-slate-300 resize-y"
-            />
+
+            {/* Conversion Warnings from Confluence XHTML Parser */}
+            {activeDoc.conversionWarnings && activeDoc.conversionWarnings.length > 0 && (
+              <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                <div className="font-semibold flex items-center gap-1.5">
+                  <AlertTriangle className="w-3.5 h-3.5" />
+                  <span>
+                    {language === 'fa'
+                      ? 'یادداشت‌های تبدیل محتوای Confluence'
+                      : 'Content Conversion Warnings'}
+                  </span>
+                </div>
+                <ul className="list-disc ps-5 space-y-0.5 text-[11px]">
+                  {activeDoc.conversionWarnings.map((w, idx) => (
+                    <li key={idx}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Safe Structured Blocks Renderer OR Markdown Editor */}
+            {!isEditingDoc && activeDoc.structuredBlocks && activeDoc.structuredBlocks.length > 0 ? (
+              <div className="space-y-3 text-xs text-slate-700 dark:text-slate-300 leading-relaxed">
+                {activeDoc.structuredBlocks.map((block, idx) => {
+                  if (block.type === 'heading') {
+                    const cls =
+                      block.level <= 2
+                        ? 'text-base font-bold text-slate-900 dark:text-white pt-2'
+                        : 'text-sm font-bold text-slate-800 dark:text-slate-100 pt-1';
+                    return (
+                      <div key={idx} className={cls}>
+                        {block.text}
+                      </div>
+                    );
+                  }
+                  if (block.type === 'paragraph') {
+                    return <p key={idx}>{block.text}</p>;
+                  }
+                  if (block.type === 'quote') {
+                    return (
+                      <blockquote
+                        key={idx}
+                        className="ps-3 border-s-2 border-blue-500 text-slate-600 dark:text-slate-400 italic"
+                      >
+                        {block.text}
+                      </blockquote>
+                    );
+                  }
+                  if (block.type === 'code') {
+                    return (
+                      <pre
+                        key={idx}
+                        dir="ltr"
+                        className="p-3 rounded-lg bg-slate-950 text-slate-100 font-mono text-[11px] overflow-x-auto"
+                      >
+                        {block.code}
+                      </pre>
+                    );
+                  }
+                  if (block.type === 'list') {
+                    const TagName = block.ordered ? 'ol' : 'ul';
+                    return (
+                      <TagName
+                        key={idx}
+                        className={`${block.ordered ? 'list-decimal' : 'list-disc'} ps-5 space-y-1`}
+                      >
+                        {block.items.map((it, i2) => (
+                          <li key={i2}>{it}</li>
+                        ))}
+                      </TagName>
+                    );
+                  }
+                  if (block.type === 'table') {
+                    return (
+                      <div key={idx} className="overflow-x-auto border border-slate-200 dark:border-slate-800 rounded-lg">
+                        <table className="w-full text-xs text-start border-collapse">
+                          <thead className="bg-slate-50 dark:bg-slate-800/70">
+                            <tr>
+                              {block.headers.map((h, hi) => (
+                                <th key={hi} className="px-3 py-2 font-semibold border-b border-slate-200 dark:border-slate-800 text-start">
+                                  {h}
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                            {block.rows.map((row, ri) => (
+                              <tr key={ri}>
+                                {row.map((cell, ci) => (
+                                  <td key={ci} className="px-3 py-2 text-slate-700 dark:text-slate-300">
+                                    {cell}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    );
+                  }
+                  if (block.type === 'image') {
+                    return (
+                      <div key={idx} className="p-2 rounded border border-slate-200 dark:border-slate-800 text-[11px] text-slate-500">
+                        <span className="font-semibold">Image:</span> {block.alt}{' '}
+                        <span className="font-mono text-slate-400">({block.url})</span>
+                      </div>
+                    );
+                  }
+                  return (
+                    <div
+                      key={idx}
+                      className="p-2.5 rounded bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700 text-[11px]"
+                    >
+                      <span className="font-mono font-semibold text-slate-500">[{block.macroName}]</span>{' '}
+                      <span>{block.fallbackText}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <textarea
+                rows={12}
+                value={activeDoc.content}
+                onChange={e => updateSpaceDoc(currentProject.id, activeDoc.id, activeDoc.title, e.target.value)}
+                className="w-full text-xs leading-relaxed bg-transparent focus:outline-none text-slate-700 dark:text-slate-300 resize-y"
+              />
+            )}
+
+            {/* Attachments & Comments Footer */}
+            {(activeDoc.attachments?.length || activeDoc.comments?.length) ? (
+              <div className="pt-4 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+                {activeDoc.attachments && activeDoc.attachments.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                      <Paperclip className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{language === 'fa' ? 'پیوست‌ها' : 'Attachments'}</span>
+                    </div>
+                    <div className="space-y-1">
+                      {activeDoc.attachments.map(att => (
+                        <div key={att.id} className="flex items-center justify-between px-2.5 py-1.5 rounded bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800">
+                          <span className="truncate font-medium">{att.name}</span>
+                          <span className="font-mono text-[10px] text-slate-400 shrink-0">{att.size}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {activeDoc.comments && activeDoc.comments.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="font-bold text-slate-700 dark:text-slate-200 flex items-center gap-1.5">
+                      <MessageSquare className="w-3.5 h-3.5 text-slate-400" />
+                      <span>{language === 'fa' ? 'نظرات صفحه' : 'Page Comments'}</span>
+                    </div>
+                    <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                      {activeDoc.comments.map(c => (
+                        <div key={c.id} className="p-2 rounded bg-slate-50 dark:bg-slate-800/50 border border-slate-200/70 dark:border-slate-800 space-y-0.5">
+                          <div className="flex items-center justify-between text-[10px] text-slate-400">
+                            <span className="font-semibold text-slate-700 dark:text-slate-200">{c.author}</span>
+                            <span className="font-mono">{formatLocalizedDateTime(c.createdAt, language)}</span>
+                          </div>
+                          <div className="text-[11px] text-slate-600 dark:text-slate-300">{c.text}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : null}
           </div>
         ) : (
           <div className="text-center py-12 text-xs text-slate-400">
