@@ -299,14 +299,6 @@ export const BoardView: React.FC = () => {
               <option value="assignee">{t.assignee}</option>
               <option value="epic">{t.epic}</option>
             </select>
-
-            <button
-              onClick={() => openCreateModal(activeSprint ? activeSprint.id : null, 'story')}
-              className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-md font-semibold flex items-center gap-1"
-            >
-              <Plus className="w-3 h-3" />
-              <span>{language === 'fa' ? 'استوری' : 'Story'}</span>
-            </button>
           </div>
         </div>
       </div>

@@ -56,6 +56,8 @@ export type WorkflowRuleType =
   | 'validate_permission'
   | 'perform_assign'
   | 'perform_copy_field'
+  | 'perform_set_security_level'
+  | 'perform_trigger_webhook'
   | 'perform_update_field';
 
 export interface WorkflowRule {
@@ -73,6 +75,7 @@ export interface WorkflowTransition {
   name: string;
   nameFa: string;
   fromStatusId: 'start' | 'any' | string;
+  fromStatusIds?: string[];
   toStatusId: string;
   rules: WorkflowRule[];
 }
@@ -81,6 +84,10 @@ export interface WorkflowDefinition {
   id: string;
   projectId: string;
   name: string;
+  description?: string;
+  isActive?: boolean;
+  schemeName?: string;
+  updatedAt?: string;
   statuses: Status[];
   transitions: WorkflowTransition[];
 }
@@ -170,6 +177,7 @@ export interface Issue {
   storyPoints?: number;
   originalEstimateMinutes?: number;
   remainingEstimateMinutes?: number;
+  securityLevel?: string;
   flagged?: boolean;
   archived?: boolean;
   issueColor?: string;

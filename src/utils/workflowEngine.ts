@@ -232,15 +232,15 @@ export const WORKFLOW_RULE_CATALOG: RuleCatalogItem[] = [
       },
     ],
   },
-  // 3 Perform action rules
+  // 5 Perform action rules
   {
     type: 'perform_assign',
     kind: 'perform',
     name: 'Assign a work item',
     nameFa: 'تخصیص خودکار مسئول تسک',
     classicEquivalent: 'Assign post-function',
-    purpose: 'Auto-assign the item to the current user or reporter after moving',
-    purposeFa: 'تغییر خودکار مسئول انجام تسک پس از اتمام انتقال',
+    purpose: 'Automatically assign a work item to someone after moving the work item using a particular transition.',
+    purposeFa: 'تغییر خودکار مسئول انجام تسک پس از اتمام انتقال به کاربر مشخص‌شده',
     configSchema: [
       {
         key: 'target',
@@ -261,8 +261,8 @@ export const WORKFLOW_RULE_CATALOG: RuleCatalogItem[] = [
     name: 'Copy the value of one field to another',
     nameFa: 'کپی مقدار یک فیلد به فیلد دیگر',
     classicEquivalent: 'Copy-field post-function',
-    purpose: 'Copy a source field (e.g. Reporter) to a target field (e.g. Assignee)',
-    purposeFa: 'کپی خودکار مقدار فیلد مبدأ به فیلد مقصد پس از انتقال',
+    purpose: 'Automatically copy the value of one field to another after moving the work item using a particular transition.',
+    purposeFa: 'کپی خودکار مقدار فیلد مبدأ به فیلد مقصد پس از انتقال تسک',
     configSchema: [
       {
         key: 'fromField',
@@ -270,7 +270,11 @@ export const WORKFLOW_RULE_CATALOG: RuleCatalogItem[] = [
         labelFa: 'فیلد مبدأ',
         options: [
           { value: 'reporterId', label: 'Reporter' },
+          { value: 'assigneeId', label: 'Assignee' },
           { value: 'startDate', label: 'Start Date' },
+          { value: 'dueDate', label: 'Due Date' },
+          { value: 'team', label: 'Team' },
+          { value: 'securityLevel', label: 'Security Level' },
         ],
         defaultValue: 'reporterId',
       },
@@ -281,8 +285,85 @@ export const WORKFLOW_RULE_CATALOG: RuleCatalogItem[] = [
         options: [
           { value: 'assigneeId', label: 'Assignee' },
           { value: 'dueDate', label: 'Due Date' },
+          { value: 'startDate', label: 'Start Date' },
+          { value: 'team', label: 'Team' },
+          { value: 'securityLevel', label: 'Security Level' },
         ],
         defaultValue: 'assigneeId',
+      },
+    ],
+  },
+  {
+    type: 'perform_set_security_level',
+    kind: 'perform',
+    name: "Set a work item's security level",
+    nameFa: 'تنظیم سطح امنیتی تسک (Security Level)',
+    classicEquivalent: 'Set security level post-function',
+    purpose: "Automatically set a work item's security level if the user is in a specific space role after moving the work item using a particular transition.",
+    purposeFa: 'تنظیم خودکار سطح امنیتی تسک در صورتی که کاربر در نقش مشخصی از فضا باشد',
+    configSchema: [
+      {
+        key: 'requiredRole',
+        label: 'If user is in space role',
+        labelFa: 'اگر کاربر دارای نقش فضا باشد',
+        options: [
+          { value: 'any', label: 'Any Space Role' },
+          { value: 'admin', label: 'Administrators' },
+          { value: 'product_owner', label: 'Product Owners' },
+          { value: 'qa', label: 'QA Engineers' },
+          { value: 'developer', label: 'Developers' },
+          { value: 'designer', label: 'Designers' },
+        ],
+        defaultValue: 'any',
+      },
+      {
+        key: 'securityLevel',
+        label: 'Security Level',
+        labelFa: 'سطح امنیتی هدف',
+        options: [
+          { value: 'Standard', label: 'Standard (Team Visible)' },
+          { value: 'Confidential', label: 'Confidential (Members Only)' },
+          { value: 'Restricted', label: 'Restricted (Leads & Security)' },
+          { value: 'Executive Only', label: 'Executive Only' },
+        ],
+        defaultValue: 'Confidential',
+      },
+    ],
+  },
+  {
+    type: 'perform_trigger_webhook',
+    kind: 'perform',
+    name: 'Trigger a webhook',
+    nameFa: 'فراخوانی وب‌هوک (Trigger a webhook)',
+    classicEquivalent: 'Webhook post-function',
+    purpose: 'Notify other apps and websites that this work item has moved through a particular transition.',
+    purposeFa: 'اطلاع‌رسانی به سرویس‌ها و وب‌سایت‌های دیگر هنگام عبور تسک از این انتقال',
+    configSchema: [
+      {
+        key: 'url',
+        label: 'Webhook Endpoint URL',
+        labelFa: 'نشانی وب‌هوک (Endpoint URL)',
+        defaultValue: 'https://hooks.example.com/jira/transition',
+      },
+      {
+        key: 'method',
+        label: 'HTTP Method',
+        labelFa: 'متد HTTP',
+        options: [
+          { value: 'POST', label: 'POST (JSON Payload)' },
+          { value: 'PUT', label: 'PUT (State Sync)' },
+        ],
+        defaultValue: 'POST',
+      },
+      {
+        key: 'includePayload',
+        label: 'Payload Scope',
+        labelFa: 'محتوای ارسالی',
+        options: [
+          { value: 'full', label: 'Full Work Item & Transition Context' },
+          { value: 'summary', label: 'Key, Status & Actor Only' },
+        ],
+        defaultValue: 'full',
       },
     ],
   },
@@ -292,8 +373,8 @@ export const WORKFLOW_RULE_CATALOG: RuleCatalogItem[] = [
     name: 'Update a work item field',
     nameFa: 'به‌روزرسانی خودکار یک فیلد',
     classicEquivalent: 'Update-field post-function',
-    purpose: 'Set a field value automatically after the status changes',
-    purposeFa: 'تنظیم مقدار مشخص برای فیلد (مثلاً نتیجه یا پرچم) بعد از تغییر وضعیت',
+    purpose: 'Automatically change the value of one work item field after moving the work item using a particular transition.',
+    purposeFa: 'تغییر خودکار مقدار یک فیلد تسک بعد از عبور از انتقال مشخص',
     configSchema: [
       {
         key: 'field',
@@ -303,6 +384,8 @@ export const WORKFLOW_RULE_CATALOG: RuleCatalogItem[] = [
           { value: 'resolution', label: 'Resolution' },
           { value: 'flagged', label: 'Flagged' },
           { value: 'priority', label: 'Priority' },
+          { value: 'securityLevel', label: 'Security Level' },
+          { value: 'storyPoints', label: 'Story Points' },
         ],
         defaultValue: 'resolution',
       },
@@ -480,6 +563,19 @@ export function evaluateValidateRules(
   return { valid: true };
 }
 
+export function getTransitionFromIds(transition: WorkflowTransition): string[] {
+  if (transition.fromStatusIds && transition.fromStatusIds.length > 0) {
+    return transition.fromStatusIds;
+  }
+  return [transition.fromStatusId];
+}
+
+export function transitionMatchesSource(transition: WorkflowTransition, currentStatusId: string): boolean {
+  if (transition.fromStatusId === 'start') return false;
+  const sources = getTransitionFromIds(transition);
+  return sources.includes('any') || sources.includes(currentStatusId);
+}
+
 /**
  * Get reachable transitions for an item from its current status (omitting current status, matching Figure 1).
  */
@@ -493,7 +589,7 @@ export function getAvailableTransitions(
     tr =>
       tr.fromStatusId !== 'start' &&
       tr.toStatusId !== issue.status &&
-      (tr.fromStatusId === 'any' || tr.fromStatusId === issue.status)
+      transitionMatchesSource(tr, issue.status)
   );
 
   const results: {
@@ -512,6 +608,13 @@ export function getAvailableTransitions(
   return results;
 }
 
+export interface PipelineExecutionNote {
+  ruleId: string;
+  ruleName: string;
+  status: 'success' | 'skipped';
+  message: string;
+}
+
 /**
  * Execute Stages 2-5 of the transition pipeline (Offer -> Validate -> Change -> Post Actions).
  */
@@ -522,7 +625,13 @@ export function runTransitionPipeline(params: {
   workflow: WorkflowDefinition;
   epics: Epic[];
   language: 'fa' | 'en';
-}): { ok: boolean; error?: string; updates?: Partial<Issue>; historyEntry?: HistoryEntry } {
+}): {
+  ok: boolean;
+  error?: string;
+  updates?: Partial<Issue>;
+  historyEntry?: HistoryEntry;
+  automationNotes?: PipelineExecutionNote[];
+} {
   const { issue, targetStatusId, user, workflow, epics, language } = params;
 
   if (issue.status === targetStatusId) {
@@ -532,8 +641,7 @@ export function runTransitionPipeline(params: {
   const transition = workflow.transitions.find(
     tr =>
       tr.toStatusId === targetStatusId &&
-      tr.fromStatusId !== 'start' &&
-      (tr.fromStatusId === issue.status || tr.fromStatusId === 'any')
+      transitionMatchesSource(tr, issue.status)
   );
 
   if (!transition) {
@@ -581,6 +689,8 @@ export function runTransitionPipeline(params: {
     updates.resolution = null;
   }
 
+  const automationNotes: PipelineExecutionNote[] = [];
+
   // Stage 5: Perform Actions (Post-functions)
   const performRules = transition.rules.filter(r => r.kind === 'perform');
   for (const rule of performRules) {
@@ -592,14 +702,92 @@ export function runTransitionPipeline(params: {
         updates.assigneeId = issue.reporterId;
       } else if (target === 'unassigned') {
         updates.assigneeId = null;
+      } else if (target.startsWith('user:')) {
+        updates.assigneeId = target.slice(5) || null;
       }
+      automationNotes.push({
+        ruleId: rule.id,
+        ruleName: language === 'fa' ? rule.labelFa : rule.label,
+        status: 'success',
+        message:
+          language === 'fa'
+            ? `تخصیص مسئول بر اساس قانون (${target}) اجرا شد.`
+            : `Assigned work item (${target}).`,
+      });
     } else if (rule.type === 'perform_copy_field') {
       const fromField = rule.config.fromField || 'reporterId';
       const toField = rule.config.toField || 'assigneeId';
       const val = (issue as unknown as Record<string, unknown>)[fromField];
       if (val !== undefined) {
         (updates as Record<string, unknown>)[toField] = val;
+        automationNotes.push({
+          ruleId: rule.id,
+          ruleName: language === 'fa' ? rule.labelFa : rule.label,
+          status: 'success',
+          message:
+            language === 'fa'
+              ? `مقدار فیلد ${fromField} به ${toField} کپی شد.`
+              : `Copied ${fromField} to ${toField}.`,
+        });
       }
+    } else if (rule.type === 'perform_set_security_level') {
+      const requiredRole = rule.config.requiredRole || 'any';
+      const securityLevel = rule.config.securityLevel || 'Confidential';
+      const roleMatches =
+        requiredRole === 'any' || (user && (user.role === requiredRole || user.role === 'admin'));
+      if (roleMatches) {
+        updates.securityLevel = securityLevel;
+        automationNotes.push({
+          ruleId: rule.id,
+          ruleName: language === 'fa' ? rule.labelFa : rule.label,
+          status: 'success',
+          message:
+            language === 'fa'
+              ? `سطح امنیتی روی «${securityLevel}» تنظیم شد.`
+              : `Security level set to "${securityLevel}".`,
+        });
+      } else {
+        automationNotes.push({
+          ruleId: rule.id,
+          ruleName: language === 'fa' ? rule.labelFa : rule.label,
+          status: 'skipped',
+          message:
+            language === 'fa'
+              ? `رد شد: کاربر دارای نقش «${requiredRole}» نیست.`
+              : `Skipped: user is not in role "${requiredRole}".`,
+        });
+      }
+    } else if (rule.type === 'perform_trigger_webhook') {
+      const url = (rule.config.url || '').trim();
+      const method = rule.config.method === 'PUT' ? 'PUT' : 'POST';
+      if (url && /^https?:\/\//i.test(url) && !url.includes('example.com') && typeof fetch === 'function') {
+        try {
+          void fetch(url, {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              event: 'work_item_transitioned',
+              issueKey: issue.key,
+              fromStatus: issue.status,
+              toStatus: targetStatusId,
+              transition: transition.name,
+              actor: user?.email || 'system',
+              timestamp: new Date().toISOString(),
+            }),
+          }).catch(() => undefined);
+        } catch {
+          // ignore network errors for non-blocking webhook dispatch
+        }
+      }
+      automationNotes.push({
+        ruleId: rule.id,
+        ruleName: language === 'fa' ? rule.labelFa : rule.label,
+        status: 'success',
+        message:
+          language === 'fa'
+            ? `وب‌هوک (${method}) به ${url || 'endpoint'} ارسال شد.`
+            : `Webhook (${method}) triggered to ${url || 'configured endpoint'}.`,
+      });
     } else if (rule.type === 'perform_update_field') {
       const field = rule.config.field || 'resolution';
       const val = rule.config.value;
@@ -609,9 +797,23 @@ export function runTransitionPipeline(params: {
         updates.resolution = (val as Issue['resolution']) || 'Done';
       } else if (field === 'priority') {
         updates.priority = (val as Issue['priority']) || 'medium';
+      } else if (field === 'securityLevel') {
+        updates.securityLevel = val || 'Standard';
+      } else if (field === 'storyPoints') {
+        const parsed = Number(val);
+        if (!Number.isNaN(parsed)) updates.storyPoints = parsed;
       }
+      automationNotes.push({
+        ruleId: rule.id,
+        ruleName: language === 'fa' ? rule.labelFa : rule.label,
+        status: 'success',
+        message:
+          language === 'fa'
+            ? `فیلد ${field} به «${val}» به‌روزرسانی شد.`
+            : `Updated ${field} to "${val}".`,
+      });
     }
   }
 
-  return { ok: true, updates, historyEntry };
+  return { ok: true, updates, historyEntry, automationNotes };
 }

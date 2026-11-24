@@ -4,7 +4,6 @@ import {
   Search,
   Star,
   Plus,
-  Layers,
   GanttChart,
   FolderKanban,
   ArrowUpRight,
@@ -67,14 +66,7 @@ export const ForYouView: React.FC = () => {
 
         <div className="flex flex-wrap items-center gap-2">
           <button
-            onClick={() => openCreateModal(undefined, 'epic')}
-            className="px-3 py-1.5 bg-purple-600 hover:bg-purple-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5"
-          >
-            <Layers className="w-3.5 h-3.5" />
-            <span>{t.createEpic}</span>
-          </button>
-          <button
-            onClick={() => openCreateModal(undefined, 'story')}
+            onClick={() => openCreateModal()}
             className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5"
           >
             <Plus className="w-3.5 h-3.5" />

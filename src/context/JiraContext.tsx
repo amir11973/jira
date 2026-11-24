@@ -161,6 +161,9 @@ interface JiraContextType {
   statuses: Status[];
   workflows: WorkflowDefinition[];
   currentWorkflow: WorkflowDefinition;
+  editingWorkflowId: string | null;
+  setEditingWorkflowId: (id: string | null) => void;
+  activeWorkflow: WorkflowDefinition;
   epics: Epic[];
   sprints: Sprint[];
   versions: Version[];
@@ -205,11 +208,55 @@ interface JiraContextType {
   setWorkflowViewerIssueId: (id: string | null) => void;
   workflowReturnIssueId: string | null;
   setWorkflowReturnIssueId: (id: string | null) => void;
-  addWorkflowStatus: (data: { name: string; nameFa: string; category: StatusCategory }) => Status;
-  addWorkflowTransition: (data: { name: string; nameFa: string; fromStatusId: string; toStatusId: string }) => WorkflowTransition;
-  addWorkflowRule: (transitionId: string, rule: Omit<WorkflowRule, 'id'>) => void;
-  removeWorkflowRule: (transitionId: string, ruleId: string) => void;
-  removeWorkflowTransition: (transitionId: string) => void;
+  addWorkflowStatus: (
+    data: {
+      name: string;
+      nameFa?: string;
+      category: StatusCategory;
+      existingStatusId?: string;
+      allowFromAny?: boolean;
+    },
+    workflowId?: string
+  ) => Status;
+  removeWorkflowStatus: (statusId: string, workflowId?: string) => void;
+  toggleStatusGlobalTransition: (statusId: string, enabled: boolean, workflowId?: string) => void;
+  addWorkflowTransition: (
+    data: {
+      name: string;
+      nameFa?: string;
+      fromStatusId: string;
+      fromStatusIds?: string[];
+      toStatusId: string;
+    },
+    workflowId?: string
+  ) => WorkflowTransition;
+  updateWorkflowTransition: (
+    transitionId: string,
+    updates: {
+      name: string;
+      nameFa?: string;
+      fromStatusId: string;
+      fromStatusIds?: string[];
+      toStatusId: string;
+    },
+    workflowId?: string
+  ) => void;
+  addWorkflowRule: (transitionId: string, rule: Omit<WorkflowRule, 'id'>, workflowId?: string) => void;
+  removeWorkflowRule: (transitionId: string, ruleId: string, workflowId?: string) => void;
+  removeWorkflowTransition: (transitionId: string, workflowId?: string) => void;
+  createWorkflow: (data: {
+    name: string;
+    description?: string;
+    projectId?: string;
+    schemeName?: string;
+    template?: 'blank' | 'software' | 'kanban';
+  }) => WorkflowDefinition;
+  updateWorkflowMeta: (
+    workflowId: string,
+    updates: Partial<Pick<WorkflowDefinition, 'name' | 'description' | 'projectId' | 'schemeName' | 'isActive'>>
+  ) => void;
+  cloneWorkflow: (workflowId: string) => WorkflowDefinition | null;
+  deleteWorkflow: (workflowId: string) => void;
 
   // Automation & Filters Actions
   toggleAutomationRule: (ruleId: string) => void;
@@ -489,6 +536,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [createModalDefaultType, setCreateModalDefaultType] = useState<IssueType | undefined>(undefined);
   const [workflowViewerIssueId, setWorkflowViewerIssueId] = useState<string | null>(null);
   const [workflowReturnIssueId, setWorkflowReturnIssueId] = useState<string | null>(null);
+  const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
 
   // Persist Preferences & Data
   useEffect(() => {
@@ -744,6 +792,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       statuses: initialStatuses,
       transitions: initialWorkflows[0].transitions,
     };
+  const activeWorkflow =
+    (editingWorkflowId && workflows.find(w => w.id === editingWorkflowId)) || currentWorkflow;
   const statuses = currentWorkflow.statuses;
   const activeSprint = sprints.find(s => s.projectId === currentProject.id && s.status === 'active');
   const dir = language === 'fa' ? 'rtl' : 'ltr';
@@ -1022,7 +1072,36 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   // Workflow Editing Actions
-  const addWorkflowStatus = (data: { name: string; nameFa: string; category: StatusCategory }): Status => {
+  const addWorkflowStatus = (
+    data: {
+      name: string;
+      nameFa?: string;
+      category: StatusCategory;
+      existingStatusId?: string;
+      allowFromAny?: boolean;
+    },
+    workflowId?: string
+  ): Status => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const targetWf = workflows.find(w => w.id === targetWfId) || activeWorkflow;
+    const allowAny = data.allowFromAny ?? true;
+
+    const existingInPool = data.existingStatusId
+      ? workflows.flatMap(w => w.statuses).find(s => s.id === data.existingStatusId) ||
+        initialStatuses.find(s => s.id === data.existingStatusId)
+      : undefined;
+
+    const alreadyInTarget = existingInPool
+      ? targetWf.statuses.find(s => s.id === existingInPool.id)
+      : targetWf.statuses.find(s => s.name.toLowerCase() === data.name.trim().toLowerCase());
+
+    if (alreadyInTarget) {
+      if (allowAny) {
+        toggleStatusGlobalTransition(alreadyInTarget.id, true, targetWf.id);
+      }
+      return alreadyInTarget;
+    }
+
     const slug =
       data.name
         .toLowerCase()
@@ -1033,63 +1112,195 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       inprogress: 'bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300',
       done: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300',
     };
-    const newStatus: Status = {
-      id: `${slug}_${Date.now().toString().slice(-3)}`,
-      numericId: 10010 + currentWorkflow.statuses.length,
-      name: data.name,
-      nameFa: data.nameFa || data.name,
-      category: data.category,
-      color: colorMap[data.category],
-    };
+    const newStatus: Status = existingInPool
+      ? { ...existingInPool }
+      : {
+          id: `${slug}_${Date.now().toString().slice(-3)}`,
+          numericId: 10010 + targetWf.statuses.length,
+          name: data.name.trim(),
+          nameFa: (data.nameFa || data.name).trim(),
+          category: data.category,
+          color: colorMap[data.category],
+        };
 
-    const newTransition: WorkflowTransition = {
-      id: `tr-${Date.now()}`,
-      numericId: (currentWorkflow.transitions.length + 1) * 10 + 1,
-      name: data.name,
-      nameFa: data.nameFa || data.name,
-      fromStatusId: 'any',
-      toStatusId: newStatus.id,
-      rules: [],
-    };
+    const newTransition: WorkflowTransition | null = allowAny
+      ? {
+          id: `tr-${Date.now()}`,
+          numericId: (targetWf.transitions.length + 1) * 10 + 1,
+          name: newStatus.name,
+          nameFa: newStatus.nameFa || newStatus.name,
+          fromStatusId: 'any',
+          fromStatusIds: ['any'],
+          toStatusId: newStatus.id,
+          rules: [],
+        }
+      : null;
 
+    const now = new Date().toISOString();
     setWorkflows(prev =>
       prev.map(w =>
-        w.id === currentWorkflow.id
-          ? { ...w, statuses: [...w.statuses, newStatus], transitions: [...w.transitions, newTransition] }
+        w.id === targetWf.id
+          ? {
+              ...w,
+              updatedAt: now,
+              statuses: [...w.statuses, newStatus],
+              transitions: newTransition ? [...w.transitions, newTransition] : w.transitions,
+            }
           : w
       )
     );
     return newStatus;
   };
 
-  const addWorkflowTransition = (data: {
-    name: string;
-    nameFa: string;
-    fromStatusId: string;
-    toStatusId: string;
-  }): WorkflowTransition => {
+  const removeWorkflowStatus = (statusId: string, workflowId?: string) => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const now = new Date().toISOString();
+    setWorkflows(prev =>
+      prev.map(w =>
+        w.id === targetWfId
+          ? {
+              ...w,
+              updatedAt: now,
+              statuses: w.statuses.filter(s => s.id !== statusId),
+              transitions: w.transitions.filter(
+                tr => tr.toStatusId !== statusId && tr.fromStatusId !== statusId
+              ),
+            }
+          : w
+      )
+    );
+  };
+
+  const toggleStatusGlobalTransition = (statusId: string, enabled: boolean, workflowId?: string) => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const now = new Date().toISOString();
+    setWorkflows(prev =>
+      prev.map(w => {
+        if (w.id !== targetWfId) return w;
+        const st = w.statuses.find(s => s.id === statusId);
+        if (!st) return w;
+        const hasGlobal = w.transitions.some(
+          tr =>
+            tr.toStatusId === statusId &&
+            (tr.fromStatusId === 'any' || tr.fromStatusIds?.includes('any'))
+        );
+        if (enabled && !hasGlobal) {
+          const newTr: WorkflowTransition = {
+            id: `tr-any-${statusId}-${Date.now().toString().slice(-4)}`,
+            numericId: (w.transitions.length + 1) * 10 + 1,
+            name: st.name,
+            nameFa: st.nameFa || st.name,
+            fromStatusId: 'any',
+            fromStatusIds: ['any'],
+            toStatusId: statusId,
+            rules: [],
+          };
+          return { ...w, updatedAt: now, transitions: [...w.transitions, newTr] };
+        }
+        if (!enabled && hasGlobal) {
+          return {
+            ...w,
+            updatedAt: now,
+            transitions: w.transitions.filter(
+              tr =>
+                !(
+                  tr.toStatusId === statusId &&
+                  (tr.fromStatusId === 'any' || tr.fromStatusIds?.includes('any'))
+                )
+            ),
+          };
+        }
+        return w;
+      })
+    );
+  };
+
+  const addWorkflowTransition = (
+    data: {
+      name: string;
+      nameFa?: string;
+      fromStatusId: string;
+      fromStatusIds?: string[];
+      toStatusId: string;
+    },
+    workflowId?: string
+  ): WorkflowTransition => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const targetWf = workflows.find(w => w.id === targetWfId) || activeWorkflow;
+    const fromIds =
+      data.fromStatusIds && data.fromStatusIds.length > 0 ? data.fromStatusIds : [data.fromStatusId];
+    const primaryFrom = fromIds.includes('any') ? 'any' : fromIds[0] || data.fromStatusId;
     const newTr: WorkflowTransition = {
       id: `tr-${Date.now()}`,
-      numericId: (currentWorkflow.transitions.length + 1) * 10 + 1,
+      numericId: (targetWf.transitions.length + 1) * 10 + 1,
       name: data.name,
       nameFa: data.nameFa || data.name,
-      fromStatusId: data.fromStatusId,
+      fromStatusId: primaryFrom,
+      fromStatusIds: fromIds,
       toStatusId: data.toStatusId,
       rules: [],
     };
+    const now = new Date().toISOString();
     setWorkflows(prev =>
-      prev.map(w => (w.id === currentWorkflow.id ? { ...w, transitions: [...w.transitions, newTr] } : w))
+      prev.map(w =>
+        w.id === targetWfId ? { ...w, updatedAt: now, transitions: [...w.transitions, newTr] } : w
+      )
     );
     return newTr;
   };
 
-  const addWorkflowRule = (transitionId: string, rule: Omit<WorkflowRule, 'id'>) => {
-    const newRule: WorkflowRule = { ...rule, id: `rule-${Date.now()}` };
+  const updateWorkflowTransition = (
+    transitionId: string,
+    updates: {
+      name: string;
+      nameFa?: string;
+      fromStatusId: string;
+      fromStatusIds?: string[];
+      toStatusId: string;
+    },
+    workflowId?: string
+  ) => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const fromIds =
+      updates.fromStatusIds && updates.fromStatusIds.length > 0
+        ? updates.fromStatusIds
+        : [updates.fromStatusId];
+    const primaryFrom = fromIds.includes('any') ? 'any' : fromIds[0] || updates.fromStatusId;
+    const now = new Date().toISOString();
     setWorkflows(prev =>
       prev.map(w =>
-        w.id === currentWorkflow.id
+        w.id === targetWfId
           ? {
               ...w,
+              updatedAt: now,
+              transitions: w.transitions.map(tr =>
+                tr.id === transitionId
+                  ? {
+                      ...tr,
+                      name: updates.name,
+                      nameFa: updates.nameFa || updates.name,
+                      fromStatusId: primaryFrom,
+                      fromStatusIds: fromIds,
+                      toStatusId: updates.toStatusId,
+                    }
+                  : tr
+              ),
+            }
+          : w
+      )
+    );
+  };
+
+  const addWorkflowRule = (transitionId: string, rule: Omit<WorkflowRule, 'id'>, workflowId?: string) => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const newRule: WorkflowRule = { ...rule, id: `rule-${Date.now()}` };
+    const now = new Date().toISOString();
+    setWorkflows(prev =>
+      prev.map(w =>
+        w.id === targetWfId
+          ? {
+              ...w,
+              updatedAt: now,
               transitions: w.transitions.map(tr =>
                 tr.id === transitionId ? { ...tr, rules: [...tr.rules, newRule] } : tr
               ),
@@ -1099,12 +1310,15 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const removeWorkflowRule = (transitionId: string, ruleId: string) => {
+  const removeWorkflowRule = (transitionId: string, ruleId: string, workflowId?: string) => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const now = new Date().toISOString();
     setWorkflows(prev =>
       prev.map(w =>
-        w.id === currentWorkflow.id
+        w.id === targetWfId
           ? {
               ...w,
+              updatedAt: now,
               transitions: w.transitions.map(tr =>
                 tr.id === transitionId ? { ...tr, rules: tr.rules.filter(r => r.id !== ruleId) } : tr
               ),
@@ -1114,14 +1328,96 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const removeWorkflowTransition = (transitionId: string) => {
+  const removeWorkflowTransition = (transitionId: string, workflowId?: string) => {
+    const targetWfId = workflowId || activeWorkflow.id;
+    const now = new Date().toISOString();
     setWorkflows(prev =>
       prev.map(w =>
-        w.id === currentWorkflow.id
-          ? { ...w, transitions: w.transitions.filter(tr => tr.id !== transitionId) }
+        w.id === targetWfId
+          ? { ...w, updatedAt: now, transitions: w.transitions.filter(tr => tr.id !== transitionId) }
           : w
       )
     );
+  };
+
+  const createWorkflow = (data: {
+    name: string;
+    description?: string;
+    projectId?: string;
+    schemeName?: string;
+    template?: 'blank' | 'software' | 'kanban';
+  }): WorkflowDefinition => {
+    const now = new Date().toISOString();
+    const templateStatuses =
+      data.template === 'blank'
+        ? [initialStatuses[0], initialStatuses[3]]
+        : initialStatuses.map(s => ({ ...s }));
+    const templateTransitions: WorkflowTransition[] =
+      data.template === 'blank'
+        ? [
+            { id: `tr-${Date.now()}-1`, numericId: 1, name: 'Create', nameFa: 'ایجاد', fromStatusId: 'start', toStatusId: 'todo', rules: [] },
+            { id: `tr-${Date.now()}-2`, numericId: 11, name: 'Complete', nameFa: 'تکمیل', fromStatusId: 'todo', fromStatusIds: ['todo'], toStatusId: 'done', rules: [] },
+          ]
+        : [
+            { id: `tr-${Date.now()}-1`, numericId: 1, name: 'Create', nameFa: 'ایجاد', fromStatusId: 'start', toStatusId: 'todo', rules: [] },
+            { id: `tr-${Date.now()}-11`, numericId: 11, name: 'To Do', nameFa: 'برای انجام', fromStatusId: 'any', fromStatusIds: ['any'], toStatusId: 'todo', rules: [] },
+            { id: `tr-${Date.now()}-21`, numericId: 21, name: 'Start work', nameFa: 'شروع کار', fromStatusId: 'any', fromStatusIds: ['any'], toStatusId: 'inprogress', rules: [] },
+            { id: `tr-${Date.now()}-31`, numericId: 31, name: 'In Review', nameFa: 'بررسی کد', fromStatusId: 'any', fromStatusIds: ['any'], toStatusId: 'review', rules: [] },
+            { id: `tr-${Date.now()}-41`, numericId: 41, name: 'Done', nameFa: 'تکمیل شد', fromStatusId: 'any', fromStatusIds: ['any'], toStatusId: 'done', rules: [] },
+          ];
+    const proj = projects.find(p => p.id === data.projectId);
+    const created: WorkflowDefinition = {
+      id: `wf-${Date.now()}`,
+      projectId: data.projectId || '',
+      name: data.name.trim(),
+      description: data.description?.trim() || '',
+      isActive: Boolean(data.projectId),
+      schemeName: data.schemeName || (proj ? `${proj.key}: Simplified Workflow Scheme` : 'Unassigned'),
+      updatedAt: now,
+      statuses: templateStatuses,
+      transitions: templateTransitions,
+    };
+    setWorkflows(prev => [created, ...prev]);
+    return created;
+  };
+
+  const updateWorkflowMeta = (
+    workflowId: string,
+    updates: Partial<Pick<WorkflowDefinition, 'name' | 'description' | 'projectId' | 'schemeName' | 'isActive'>>
+  ) => {
+    const now = new Date().toISOString();
+    setWorkflows(prev => prev.map(w => (w.id === workflowId ? { ...w, ...updates, updatedAt: now } : w)));
+  };
+
+  const cloneWorkflow = (workflowId: string): WorkflowDefinition | null => {
+    const src = workflows.find(w => w.id === workflowId);
+    if (!src) return null;
+    const now = new Date().toISOString();
+    const cloned: WorkflowDefinition = {
+      ...src,
+      id: `wf-copy-${Date.now()}`,
+      projectId: '',
+      name: `Copy of ${src.name}`,
+      isActive: false,
+      schemeName: 'Unassigned',
+      updatedAt: now,
+      statuses: src.statuses.map(s => ({ ...s })),
+      transitions: src.transitions.map(tr => ({
+        ...tr,
+        id: `${tr.id}-copy-${Date.now().toString().slice(-4)}`,
+        fromStatusIds: tr.fromStatusIds ? [...tr.fromStatusIds] : [tr.fromStatusId],
+        rules: tr.rules.map(r => ({ ...r, config: { ...r.config } })),
+      })),
+    };
+    setWorkflows(prev => [cloned, ...prev]);
+    return cloned;
+  };
+
+  const deleteWorkflow = (workflowId: string) => {
+    setWorkflows(prev => prev.filter(w => w.id !== workflowId));
+    if (editingWorkflowId === workflowId) {
+      setEditingWorkflowId(null);
+    }
   };
 
   // Automation & Saved Filters
@@ -1423,8 +1719,24 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const now = new Date().toISOString();
     const targetStatusObj = wf.statuses.find(s => s.id === newStatus);
     const updates: Partial<Issue> = { ...(result.updates || {}) };
-    const newExecutions: AutomationExecution[] = [];
-    const newAuditLogs: AutomationAuditLog[] = [];
+    const newExecutions: AutomationExecution[] = (result.automationNotes || []).map((note, idx) => ({
+      id: `wf-exec-${Date.now()}-${idx}`,
+      ruleId: note.ruleId,
+      ruleName: note.ruleName,
+      status: note.status,
+      message: note.message,
+      executedAt: now,
+    }));
+    const newAuditLogs: AutomationAuditLog[] = (result.automationNotes || []).map((note, idx) => ({
+      id: `wf-alog-${Date.now()}-${idx}`,
+      projectId: issue.projectId,
+      ruleId: note.ruleId,
+      ruleName: note.ruleName,
+      issueKey: issue.key,
+      status: note.status,
+      details: note.message,
+      timestamp: now,
+    }));
     const executedRuleIds: string[] = [];
 
     const activeRules = automationRules.filter(r => r.projectId === issue.projectId && r.enabled);
@@ -2772,6 +3084,9 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         statuses,
         workflows,
         currentWorkflow,
+        editingWorkflowId,
+        setEditingWorkflowId,
+        activeWorkflow,
         epics,
         sprints,
         versions,
@@ -2809,10 +3124,17 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         workflowReturnIssueId,
         setWorkflowReturnIssueId,
         addWorkflowStatus,
+        removeWorkflowStatus,
+        toggleStatusGlobalTransition,
         addWorkflowTransition,
+        updateWorkflowTransition,
         addWorkflowRule,
         removeWorkflowRule,
         removeWorkflowTransition,
+        createWorkflow,
+        updateWorkflowMeta,
+        cloneWorkflow,
+        deleteWorkflow,
 
         toggleAutomationRule,
         createAutomationRule,

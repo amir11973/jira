@@ -1358,6 +1358,28 @@ export const IssueDetailModal: React.FC = () => {
                 </select>
               </div>
 
+              {/* Security Level */}
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5">
+                  {language === 'fa' ? 'سطح امنیتی (Security Level)' : 'Security Level'}
+                </label>
+                <select
+                  value={issue.securityLevel || ''}
+                  onChange={e =>
+                    updateIssue(issue.id, {
+                      securityLevel: e.target.value || undefined,
+                    })
+                  }
+                  className="w-full px-3 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500"
+                >
+                  <option value="">{language === 'fa' ? 'پیش‌فرض فضا (None)' : 'None (Default)'}</option>
+                  <option value="Standard">Standard</option>
+                  <option value="Confidential">Confidential</option>
+                  <option value="Restricted">Restricted</option>
+                  <option value="Executive Only">Executive Only</option>
+                </select>
+              </div>
+
               {/* Assignee */}
               <div>
                 <div className="flex items-center justify-between mb-1.5">

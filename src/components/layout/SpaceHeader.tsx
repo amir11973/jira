@@ -23,7 +23,6 @@ import {
   Maximize2,
   Minimize2,
   Plus,
-  Layers,
   Check,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
@@ -41,7 +40,6 @@ export const SpaceHeader: React.FC = () => {
     isSpaceFullscreen,
     setIsSpaceFullscreen,
     users,
-    openCreateModal,
     showToast,
     t,
     language,
@@ -135,24 +133,6 @@ export const SpaceHeader: React.FC = () => {
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {/* Quick Creation Shortcuts right inside Space Header */}
-          <button
-            onClick={() => openCreateModal(undefined, 'epic')}
-            className="px-2.5 py-1 rounded-md border border-purple-200 dark:border-purple-800 bg-purple-50/70 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 hover:bg-purple-100 text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap"
-          >
-            <Layers className="w-3 h-3" />
-            <span>+ {t.epicType}</span>
-          </button>
-          <button
-            onClick={() => openCreateModal(undefined, 'story')}
-            className="px-2.5 py-1 rounded-md border border-emerald-200 dark:border-emerald-800 bg-emerald-50/70 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 hover:bg-emerald-100 text-[11px] font-semibold flex items-center gap-1 whitespace-nowrap"
-          >
-            <Plus className="w-3 h-3" />
-            <span>+ {t.storyType}</span>
-          </button>
-
-          <div className="h-4 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block" />
-
           {/* Member Avatars */}
           <div className="hidden md:flex items-center -space-x-1.5">
             {users.slice(0, 4).map(u => (

@@ -147,7 +147,11 @@ export const WorkflowViewerModal: React.FC = () => {
                     <div className="font-semibold text-slate-800 dark:text-slate-200">
                       → {language === 'fa' ? statusObj.nameFa : statusObj.name}
                       <span className="text-[10px] font-mono text-slate-400 ms-1.5">
-                        ({transition.fromStatusId === 'any' ? 'Any status' : transition.fromStatusId} · #{transition.numericId})
+                        ({transition.fromStatusId === 'any' || transition.fromStatusIds?.includes('any')
+                          ? 'Any status'
+                          : (transition.fromStatusIds && transition.fromStatusIds.length > 0
+                              ? transition.fromStatusIds.join(', ')
+                              : transition.fromStatusId)} · #{transition.numericId})
                       </span>
                     </div>
                     {!restrictResult.allowed && (
