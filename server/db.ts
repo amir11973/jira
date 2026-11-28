@@ -198,6 +198,114 @@ const MIGRATIONS: Array<{ version: number; sql: string }> = [
       CREATE INDEX idx_sprint_events_sprint ON sprint_events(sprint_id, ts, id);
     `,
   },
+  {
+    version: 4,
+    // P3 integrations. Everything that used to live in the .data/integration-db.json file store is now in SQLite
+    // (transactional, shared with the rest of the data). Secrets inside "data" are always AES-GCM ciphertext.
+    sql: `
+      CREATE TABLE integ_connections (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        data TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (org_id, provider)
+      );
+
+      -- generic JSON document store for low-volume integration records (configs, templates, jobs, job items,
+      -- conflicts, audit, history). "ref" and "status" are the only columns that are filtered on.
+      CREATE TABLE integ_docs (
+        kind TEXT NOT NULL,
+        id TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        ref TEXT,
+        status TEXT,
+        data TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (kind, id)
+      );
+      CREATE INDEX idx_integ_docs_org ON integ_docs(kind, org_id, created_at);
+      CREATE INDEX idx_integ_docs_ref ON integ_docs(kind, ref);
+
+      CREATE TABLE integ_links (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        connection_id TEXT NOT NULL,
+        ext_type TEXT NOT NULL,
+        ext_id TEXT NOT NULL,
+        local_type TEXT NOT NULL,
+        local_id TEXT NOT NULL,
+        project_id TEXT,
+        missing INTEGER NOT NULL DEFAULT 0,
+        data TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (org_id, provider, connection_id, ext_type, ext_id)
+      );
+      CREATE INDEX idx_integ_links_local ON integ_links(org_id, local_type, local_id);
+
+      -- source control: pull requests, branches, commits, deployments and vulnerability alerts per repository
+      CREATE TABLE scm_items (
+        kind TEXT NOT NULL,
+        repo_id TEXT NOT NULL,
+        ext_id TEXT NOT NULL,
+        org_id TEXT NOT NULL,
+        state TEXT,
+        issue_keys TEXT NOT NULL DEFAULT '[]',
+        data TEXT NOT NULL,
+        ext_updated_at TEXT,
+        synced_at TEXT NOT NULL,
+        PRIMARY KEY (kind, repo_id, ext_id)
+      );
+      CREATE INDEX idx_scm_org ON scm_items(org_id, kind, state);
+
+      CREATE TABLE integ_webhooks (
+        id TEXT PRIMARY KEY,
+        org_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        name TEXT NOT NULL,
+        repo_id TEXT,
+        secret_enc TEXT NOT NULL,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        created_by TEXT,
+        created_at TEXT NOT NULL,
+        last_delivery_at TEXT,
+        delivery_count INTEGER NOT NULL DEFAULT 0
+      );
+
+      CREATE TABLE integ_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org_id TEXT NOT NULL,
+        webhook_id TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        delivery_id TEXT NOT NULL,
+        event_type TEXT NOT NULL,
+        payload TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'received',
+        attempts INTEGER NOT NULL DEFAULT 0,
+        error TEXT,
+        result TEXT,
+        received_at TEXT NOT NULL,
+        processed_at TEXT,
+        UNIQUE (webhook_id, delivery_id)
+      );
+      CREATE INDEX idx_integ_events_org ON integ_events(org_id, id);
+
+      CREATE TABLE integ_health (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        org_id TEXT NOT NULL,
+        connection_id TEXT NOT NULL,
+        ts TEXT NOT NULL,
+        status TEXT NOT NULL,
+        latency_ms INTEGER,
+        message TEXT,
+        detail TEXT
+      );
+      CREATE INDEX idx_integ_health_conn ON integ_health(connection_id, id);
+    `,
+  },
 ];
 
 function migrate(): void {

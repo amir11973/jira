@@ -66,6 +66,7 @@ import {
   suggestAutoMappings,
   validateMappingRules,
 } from '../../utils/integrationEngine';
+import { HealthPanel, SourceControlPanel, WebhooksPanel } from './P3Panels';
 import {
   ConfluenceBrandIcon,
   ExcelBrandIcon,
@@ -77,6 +78,9 @@ type CenterTab =
   | 'wizard'
   | 'jobs'
   | 'conflicts'
+  | 'source_control'
+  | 'webhooks'
+  | 'health'
   | 'templates_schedules'
   | 'history';
 
@@ -249,6 +253,8 @@ export const IntegrationCenterView: React.FC = () => {
   const [statusMap, setStatusMap] = useState<Record<string, string>>({});
   const [autoCreateMissingStatuses, setAutoCreateMissingStatuses] = useState(false);
   const [showPreview, setShowPreview] = useState(false);
+  const [twoWaySync, setTwoWaySync] = useState(false);
+  const [cfgBidirectional, setCfgBidirectional] = useState(false);
   const [templateNameInput, setTemplateNameInput] = useState('');
   const [executingImport, setExecutingImport] = useState(false);
   const [queueingJob, setQueueingJob] = useState(false);
@@ -1043,7 +1049,8 @@ export const IntegrationCenterView: React.FC = () => {
           conflictPolicy,
           sourceScopes: selectedRemoteKeys,
           jqlOrCql: jiraJql.trim() || undefined,
-          items: rawRows,
+          statusMap,
+          bidirectional: twoWaySync,
         }),
       });
 
@@ -1068,124 +1075,35 @@ export const IntegrationCenterView: React.FC = () => {
     }
   };
 
-  // Direct "Sync Now" from Jira or Confluence overview card
+  // Direct "Sync Now" from Jira or Confluence overview card: a server job into the current space
   const handleQuickSyncProvider = async (provider: 'jira' | 'confluence') => {
     const conn = connections[provider];
     if (!conn) return;
     setSyncingProvider(provider);
     try {
-      const endpoint =
-        provider === 'jira'
-          ? '/api/integrations/jira/discover'
-          : '/api/integrations/confluence/discover';
-
       const keys = conn.projectsOrSpaces.slice(0, 3).map(p => p.key);
-      const res = await apiFetch(endpoint, {
+      const res = await apiFetch('/api/integrations/jobs', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(
-          provider === 'jira'
-            ? {
-                projectKeys: keys,
-                maxResults: 150,
-                ...(conn.lastSyncedAt ? { updatedSince: conn.lastSyncedAt } : {}),
-              }
-            : {
-                spaceKeys: keys,
-                maxResults: 100,
-                ...(conn.lastSyncedAt ? { updatedSince: conn.lastSyncedAt } : {}),
-              }
-        ),
+        body: JSON.stringify({
+          connectionId: conn.id,
+          provider,
+          mode: 'full',
+          sourceLabel: `${provider.toUpperCase()} Sync (${keys.join(', ') || 'All'})`,
+          targetSpaceKey: currentProject.key,
+          destinationModule: provider === 'jira' ? 'work_items' : 'documents',
+          conflictPolicy: 'manual_review',
+          sourceScopes: keys,
+        }),
       });
-
-      const data = (await res.json()) as {
-        sourceFields?: SourceFieldMeta[];
-        distinctStatuses?: string[];
-        issues?: Array<Record<string, unknown>>;
-        pages?: Array<Record<string, unknown>>;
-        sprints?: Array<{
-          id: string;
-          name: string;
-          goal: string;
-          state: string;
-          startDate?: string;
-          endDate?: string;
-        }>;
-        error?: string;
-      };
-
-      if (!res.ok) {
+      const data = (await res.json()) as { job?: IntegrationJobRecord; error?: string };
+      if (!res.ok || !data.job) {
         showToast('error', data.error || (isFa ? 'خطا در همگام‌سازی.' : 'Sync failed.'));
         return;
       }
-
-      const mod: DestinationModule = provider === 'jira' ? 'work_items' : 'documents';
-      const rows = provider === 'jira' ? data.issues || [] : data.pages || [];
-      const savedTpl = mappingTemplates.find(
-        tpl => tpl.source === provider && tpl.destinationModule === mod
-      );
-      const rules =
-        savedTpl?.mappings || suggestAutoMappings(data.sourceFields || [], mod, provider);
-      const sMap = savedTpl?.statusMap || {};
-
-      const { payload } = buildIntegrationPayload({
-        source: provider,
-        destinationModule: mod,
-        rawRows: rows,
-        mappings: rules,
-        statusMap: sMap,
-        workflowStatuses: targetStatuses,
-        users,
-        currentUserId: currentUser?.id || users[0]?.id || 'user-1',
-        targetProjectId: currentProject.id,
-        extraSprints: data.sprints,
-      });
-
-      const result = importIntegrationData(payload);
-
-      if (result.importedLinks && result.importedLinks.length > 0) {
-        await apiFetch('/api/integrations/external-links/record', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            provider,
-            connectionId: conn.id,
-            links: result.importedLinks.map(l => ({
-              ...l,
-              localProjectId: result.targetProjectId,
-            })),
-          }),
-        }).catch(() => null);
-      }
-
-      const rec = {
-        id: `sync-${Date.now()}`,
-        provider,
-        status: 'success' as const,
-        sourceLabel: `${provider.toUpperCase()} Sync (${keys.join(', ') || 'All'})`,
-        targetSpaceKey: result.targetProjectKey,
-        createdCount: result.createdCount,
-        updatedCount: result.updatedCount,
-        skippedCount: result.skippedCount,
-        timestamp: new Date().toISOString(),
-      };
-      addSyncHistoryRecord(rec);
-      await apiFetch('/api/integrations/history', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(rec),
-      }).catch(() => null);
-      await refreshServerState();
-
-      showToast(
-        'success',
-        isFa
-          ? `همگام‌سازی ${provider === 'jira' ? 'جیرا' : 'کانفلوئنس'} انجام شد (${formatLocalizedNumber(
-              result.createdCount,
-              language
-            )} جدید، ${formatLocalizedNumber(result.updatedCount, language)} به‌روزرسانی).`
-          : `${provider.toUpperCase()} synced: ${result.createdCount} created, ${result.updatedCount} updated.`
-      );
+      setJobs(prev => [data.job!, ...prev]);
+      setActiveTab('jobs');
+      showToast('success', isFa ? 'همگام‌سازی در صف قرار گرفت.' : `Sync into ${currentProject.key} queued.`);
     } catch (err) {
       showToast('error', err instanceof Error ? err.message : 'Sync failed.');
     } finally {
@@ -1239,7 +1157,10 @@ export const IntegrationCenterView: React.FC = () => {
   ) => {
     setResolvingConflictId(conflict.id);
     try {
-      const mergedFields = conflictMergeChoices[conflict.id] || {};
+      // what the table shows is what gets applied, including rows left on their default
+      const mergedFields = Object.fromEntries(
+        conflict.fieldDiffs.map(d => [d.field, conflictMergeChoices[conflict.id]?.[d.field] || 'destination'])
+      );
       const res = await apiFetch(`/api/integrations/conflicts/${conflict.id}/resolve`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -1251,29 +1172,9 @@ export const IntegrationCenterView: React.FC = () => {
       };
       if (!res.ok || !data.conflict) {
         showToast('error', data.error || (isFa ? 'خطا در رفع تعارض.' : 'Failed to resolve conflict.'));
+        // e.g. the values changed since detection: show the current ones
+        await refreshServerState();
         return;
-      }
-
-      // Apply source or merged values locally if matching issue exists
-      if (resolution === 'resolved_source' || resolution === 'resolved_merged') {
-        const localIssue = issues.find(
-          i => i.id === conflict.localEntityId || i.key === conflict.externalKey
-        );
-        if (localIssue) {
-          const patch: Record<string, unknown> = {};
-          for (const diff of conflict.fieldDiffs) {
-            const pick =
-              resolution === 'resolved_source'
-                ? 'source'
-                : mergedFields[diff.field] || 'source';
-            if (pick === 'source' && diff.sourceValue !== undefined) {
-              patch[diff.field] = diff.sourceValue;
-            }
-          }
-          if (Object.keys(patch).length > 0) {
-            updateIssue(localIssue.id, patch as Partial<typeof localIssue>);
-          }
-        }
       }
 
       setConflicts(prev => prev.map(c => (c.id === conflict.id ? data.conflict! : c)));
@@ -1313,6 +1214,7 @@ export const IntegrationCenterView: React.FC = () => {
           syncMode: cfgSyncMode,
           syncIntervalMinutes: Math.max(5, Number(cfgIntervalMinutes || 60)),
           conflictPolicy: cfgConflictPolicy,
+          bidirectional: cfgBidirectional,
           enabled: cfgEnabled,
         }),
       });
@@ -1556,6 +1458,21 @@ export const IntegrationCenterView: React.FC = () => {
               badge: pendingConflictsCount,
               badgeTone: 'amber',
               icon: GitCompare,
+            },
+            {
+              id: 'source_control' as const,
+              label: isFa ? 'کنترل نسخه' : 'Source Control',
+              icon: GitCompare,
+            },
+            {
+              id: 'webhooks' as const,
+              label: isFa ? 'وب‌هوک و رویدادها' : 'Webhooks & Events',
+              icon: Activity,
+            },
+            {
+              id: 'health' as const,
+              label: isFa ? 'سلامت اتصال' : 'Health',
+              icon: Activity,
             },
             {
               id: 'templates_schedules' as const,
@@ -3504,9 +3421,24 @@ export const IntegrationCenterView: React.FC = () => {
                 </button>
 
                 <div className="flex flex-wrap items-center gap-2">
+                  {selectedSource !== 'excel' && (
+                    <label className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
+                      <input type="checkbox" checked={twoWaySync} onChange={e => setTwoWaySync(e.target.checked)} />
+                      <span>{isFa ? 'همگام‌سازی دوطرفه' : 'Two-way sync (background)'}</span>
+                    </label>
+                  )}
                   <button
                     onClick={() => void handleQueueBackgroundJob()}
-                    disabled={!validation.valid || queueingJob || rawRows.length === 0}
+                    disabled={!validation.valid || queueingJob || rawRows.length === 0 || selectedSource === 'excel' || targetSpaceMode === 'new'}
+                    title={
+                      selectedSource === 'excel'
+                        ? isFa ? 'فایل اکسل با «اجرای ورود» وارد می‌شود.' : 'Excel files are imported with "Execute import".'
+                        : targetSpaceMode === 'new'
+                        ? isFa ? 'برای همگام‌سازی پس‌زمینه یک فضای موجود انتخاب کنید.' : 'Background sync needs an existing space.'
+                        : isFa
+                        ? 'داده‌ها مستقیم از منبع خوانده و با نگاشت استاندارد و نگاشت وضعیت شما ادغام می‌شوند.'
+                        : 'Reads directly from the source and merges using the standard field mapping plus your status mapping.'
+                    }
                     className="px-4 py-2.5 bg-slate-800 dark:bg-slate-700 hover:bg-slate-900 text-white rounded-md font-semibold flex items-center gap-2 whitespace-nowrap shrink-0 disabled:opacity-50"
                   >
                     {queueingJob ? (
@@ -3870,6 +3802,7 @@ export const IntegrationCenterView: React.FC = () => {
                         <thead className="bg-slate-100/80 dark:bg-slate-800/70 border-b border-slate-200 dark:border-slate-800 text-slate-500">
                           <tr>
                             <th className="p-2.5 text-start">{isFa ? 'فیلد' : 'Field'}</th>
+                            <th className="p-2.5 text-start">{isFa ? 'آخرین مقدار مشترک' : 'Last Synced Value'}</th>
                             <th className="p-2.5 text-start">{isFa ? 'مقدار منبع (Source)' : 'Incoming Source Value'}</th>
                             <th className="p-2.5 text-start">{isFa ? 'مقدار فعلی محلی (Local)' : 'Current Local Value'}</th>
                             {isPending && (
@@ -3879,11 +3812,14 @@ export const IntegrationCenterView: React.FC = () => {
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                           {conflict.fieldDiffs.map(diff => {
-                            const selectedSide = choices[diff.field] || diff.chosen || 'source';
+                            const selectedSide = choices[diff.field] || diff.chosen || 'destination';
                             return (
                               <tr key={diff.field}>
                                 <td className="p-2.5 font-mono font-bold text-slate-800 dark:text-slate-200">
                                   {diff.field}
+                                </td>
+                                <td className="p-2.5 text-slate-500 max-w-[220px] break-words">
+                                  {JSON.stringify((diff as { baseValue?: unknown }).baseValue ?? '')}
                                 </td>
                                 <td className="p-2.5 text-blue-700 dark:text-blue-300 bg-blue-50/40 dark:bg-blue-950/20 max-w-[260px] break-words">
                                   {JSON.stringify(diff.sourceValue ?? '')}
@@ -3957,6 +3893,10 @@ export const IntegrationCenterView: React.FC = () => {
           )}
         </div>
       )}
+
+      {activeTab === 'source_control' && <SourceControlPanel notify={showToast} />}
+      {activeTab === 'webhooks' && <WebhooksPanel notify={showToast} />}
+      {activeTab === 'health' && <HealthPanel notify={showToast} />}
 
       {/* ======================== TAB 5: TEMPLATES & SCHEDULED SYNC PROFILES ======================== */}
       {activeTab === 'templates_schedules' && (
@@ -4081,6 +4021,10 @@ export const IntegrationCenterView: React.FC = () => {
                       </option>
                     ))}
                   </select>
+                  <label className="flex items-center gap-1.5 pt-2">
+                    <input type="checkbox" checked={cfgBidirectional} onChange={e => setCfgBidirectional(e.target.checked)} />
+                    <span>{isFa ? 'ارسال تغییرات محلی به منبع (دوطرفه)' : 'Push local changes back to the source (two-way)'}</span>
+                  </label>
                 </div>
                 <div>
                   <label className="block font-semibold mb-1">{isFa ? 'فیلتر JQL / CQL' : 'Optional JQL / CQL'}</label>

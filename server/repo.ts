@@ -16,9 +16,10 @@ import {
 import type { AnyCollection, CollectionName, Role } from './schemas.ts';
 import { ID_PATTERN, validate } from './validation.ts';
 import { VisibilityContext, canEditDashboard, canRead } from './visibility.ts';
-import { validateChangedDevLinks } from './devlinks.ts';
+import { enforceVerification, validateChangedDevLinks } from './devlinks.ts';
 import { deleteStoredFiles } from './files.ts';
 import { emitIssueEvents } from './events.ts';
+import { emitSyncOutbox } from './syncOutbox.ts';
 import { recordIssueDeleted, recordIssueHistory, recordSprintHistory } from './history.ts';
 import {
   stampPlanning,
@@ -889,6 +890,9 @@ function upsertRecord(ctx: WriteContext, collection: CollectionName, op: BatchOp
     if (problems.length) {
       throw validationFailed(problems.map(p => ({ path: `issues/${op.id}.devLinks[${p.linkId}]`, message: p.message })));
     }
+    if (enforceVerification(existingFull?.devLinks as Rec[] | undefined, data.devLinks as Rec[] | undefined)) {
+      ctx.serverModified = true;
+    }
   }
 
   // Idempotent writes: identical content must not bump the version or flood the change feed.
@@ -923,6 +927,8 @@ function upsertRecord(ctx: WriteContext, collection: CollectionName, op: BatchOp
     if (collection === 'issues') recordIssueHistory(orgId, actor.userId, existingFull, data, now);
     else if (collection === 'sprints') recordSprintHistory(orgId, actor.userId, existingFull, data, now);
   }
+
+  if (!ctx.system && !ctx.meta.suppressEvents) emitSyncOutbox(orgId, collection, existingFull, data, version);
 
   if (collection === 'issues') {
     syncIssueChildren(ctx, op.id, String(data.key), children);

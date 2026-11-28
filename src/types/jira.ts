@@ -169,10 +169,18 @@ export interface DevLinkItem {
   id: string;
   type: 'pr' | 'branch' | 'commit';
   title: string;
-  status: 'open' | 'merged' | 'deployed';
+  status: 'open' | 'merged' | 'deployed' | 'closed';
   repo: string;
   url: string;
   updatedAt: string;
+  /** Set by the server's source-control integration: the state was confirmed with the provider. */
+  verified?: boolean;
+  externalId?: string;
+  author?: string;
+  sha?: string;
+  mergedAt?: string;
+  deployedAt?: string;
+  environment?: string;
 }
 
 export interface Issue {

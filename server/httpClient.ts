@@ -3,6 +3,11 @@ import net from 'node:net';
 
 export type AuthMethod = 'api_token' | 'pat' | 'basic' | 'oauth_bearer';
 
+/** Development / test escape hatch: allow integrations to talk to localhost and private networks. */
+function allowPrivateHosts(): boolean {
+  return process.env.INTEGRATIONS_ALLOW_PRIVATE_HOSTS === 'true';
+}
+
 export function isPrivateOrBlockedIp(ip: string): boolean {
   const cleaned = ip.trim().toLowerCase();
   if (!cleaned) return true;
@@ -68,6 +73,8 @@ export async function assertSafeExternalUrl(rawUrl: string): Promise<URL> {
     throw new Error('Credentials must not be embedded in the server URL.');
   }
 
+  if (allowPrivateHosts()) return parsed;
+
   const host = parsed.hostname.toLowerCase();
   if (
     host === 'localhost' ||
@@ -115,7 +122,7 @@ export function buildAuthHeaders(
 ): Record<string, string> {
   const headers: Record<string, string> = {
     Accept: 'application/json',
-    'User-Agent': 'JiraFlow-Integration-Engine/2.0',
+    'User-Agent': 'JiraFlow-Integration-Engine/3.0',
   };
 
   if (authMethod === 'api_token') {
@@ -131,55 +138,157 @@ export function buildAuthHeaders(
   return headers;
 }
 
+export interface RateLimitInfo {
+  limit?: number;
+  remaining?: number;
+  /** Epoch ms when the window resets / the request may be retried. */
+  resetAtMs?: number;
+}
+
 export interface ExternalFetchResult {
   ok: boolean;
   status: number;
   data: unknown;
   text: string;
+  headers?: Record<string, string>;
+  rateLimit?: RateLimitInfo;
+  /** How many retries were needed (0 = first attempt succeeded). */
+  retries?: number;
+}
+
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+
+/** Thrown when the remote API told us to back off for longer than we are willing to wait inline. */
+export class RateLimitedError extends Error {
+  retryAtMs: number;
+  constructor(message: string, retryAtMs: number) {
+    super(message);
+    this.name = 'RateLimitedError';
+    this.retryAtMs = retryAtMs;
+  }
+}
+
+/** Thrown by integration code when a request is rejected with 401/403 so callers can refresh the credential. */
+export class AuthRejectedError extends Error {
+  status: number;
+  constructor(message: string, status = 401) {
+    super(message);
+    this.name = 'AuthRejectedError';
+    this.status = status;
+  }
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-function parseRetryAfterMs(headerVal: string | null, attempt: number): number {
-  if (headerVal) {
-    const seconds = Number(headerVal);
-    if (Number.isFinite(seconds) && seconds > 0) {
-      return Math.min(10000, Math.round(seconds * 1000));
-    }
-    const dt = Date.parse(headerVal);
-    if (!Number.isNaN(dt)) {
-      const diff = dt - Date.now();
-      if (diff > 0) return Math.min(10000, diff);
-    }
-  }
-  const jitter = Math.floor(Math.random() * 250);
-  return Math.min(8000, 600 * Math.pow(2, attempt) + jitter);
+// ---------------------------------------------------------------------------
+// Rate limit bookkeeping (per origin: one API host shares one budget)
+// ---------------------------------------------------------------------------
+
+const rateState = new Map<string, RateLimitInfo & { updatedAtMs: number }>();
+const MAX_INLINE_WAIT_MS = Number(process.env.INTEGRATION_MAX_INLINE_WAIT_MS || 8000);
+
+export function getRateState(origin: string): (RateLimitInfo & { updatedAtMs: number }) | undefined {
+  return rateState.get(origin);
 }
 
+export function resetRateStateForTests(): void {
+  rateState.clear();
+}
+
+function num(v: string | null | undefined): number | undefined {
+  if (v === null || v === undefined || v === '') return undefined;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function parseRateHeaders(h: Headers): RateLimitInfo | undefined {
+  const limit = num(h.get('x-ratelimit-limit')) ?? num(h.get('ratelimit-limit'));
+  const remaining = num(h.get('x-ratelimit-remaining')) ?? num(h.get('ratelimit-remaining'));
+  let resetAtMs: number | undefined;
+  const reset = num(h.get('x-ratelimit-reset')) ?? num(h.get('ratelimit-reset'));
+  if (reset !== undefined) {
+    // GitHub/GitLab send epoch seconds; some servers send "seconds until reset".
+    resetAtMs = reset > 1e9 ? reset * 1000 : Date.now() + reset * 1000;
+  }
+  const retryAfter = h.get('retry-after');
+  if (retryAfter) {
+    const secs = num(retryAfter);
+    if (secs !== undefined) resetAtMs = Date.now() + secs * 1000;
+    else {
+      const dt = Date.parse(retryAfter);
+      if (!Number.isNaN(dt)) resetAtMs = dt;
+    }
+  }
+  if (limit === undefined && remaining === undefined && resetAtMs === undefined) return undefined;
+  return { limit, remaining, resetAtMs };
+}
+
+/** Waits for (or fails fast on) an exhausted rate-limit window before sending another request. */
+async function respectRateLimit(origin: string): Promise<void> {
+  const st = rateState.get(origin);
+  if (!st || st.remaining === undefined || st.remaining > 0 || !st.resetAtMs) return;
+  const wait = st.resetAtMs - Date.now();
+  if (wait <= 0) {
+    rateState.delete(origin);
+    return;
+  }
+  if (wait > MAX_INLINE_WAIT_MS) {
+    throw new RateLimitedError(`Rate limit exhausted for ${origin}; retry after ${new Date(st.resetAtMs).toISOString()}.`, st.resetAtMs);
+  }
+  await sleep(wait + 25);
+  rateState.delete(origin);
+}
+
+function backoffMs(attempt: number, suggested?: number): number {
+  const jitter = Math.floor(Math.random() * 250);
+  const exp = Math.min(8000, 400 * 2 ** attempt + jitter);
+  return suggested !== undefined ? Math.min(MAX_INLINE_WAIT_MS, Math.max(suggested, 50)) : exp;
+}
+
+const RETRYABLE_STATUS = new Set([429, 502, 503, 504]);
+
+export interface FetchOptions {
+  maxRetries?: number;
+  timeoutMs?: number;
+}
+
+/**
+ * SSRF-guarded JSON HTTP client with:
+ *  - exponential backoff + jitter for 429/502/503/504 and network errors (honouring Retry-After)
+ *  - rate limit tracking from X-RateLimit-* / Retry-After headers; an exhausted budget makes the next call wait
+ *    (short) or throw RateLimitedError (long) instead of hammering the API
+ *  - safe, validated redirects
+ */
 export async function safeExternalFetch(
   baseUrl: string,
   endpointPath: string,
   headers: Record<string, string>,
-  method: 'GET' | 'POST' = 'GET',
+  method: HttpMethod = 'GET',
   body?: unknown,
-  maxRedirects = 2
+  maxRedirects = 2,
+  opts: FetchOptions = {}
 ): Promise<ExternalFetchResult> {
   const safeBase = await assertSafeExternalUrl(baseUrl);
   const cleanBase = `${safeBase.origin}${safeBase.pathname.replace(/\/+$/, '')}`;
   const normalizedPath = endpointPath.startsWith('/') ? endpointPath : `/${endpointPath}`;
+  const origin = safeBase.origin;
   let currentUrl = `${cleanBase}${normalizedPath}`;
   let redirects = 0;
+  const maxRetries = opts.maxRetries ?? 3;
+  let retries = 0;
 
-  for (let attempt = 0; attempt <= 2; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    await respectRateLimit(origin);
+
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 18000);
+    const timer = setTimeout(() => controller.abort(), opts.timeoutMs ?? 18000);
 
     try {
       const reqHeaders: Record<string, string> = { ...headers };
       let payload: string | undefined;
-      if (body !== undefined && method === 'POST') {
+      if (body !== undefined && method !== 'GET' && method !== 'DELETE') {
         reqHeaders['Content-Type'] = 'application/json';
         payload = JSON.stringify(body);
       }
@@ -192,10 +301,13 @@ export async function safeExternalFetch(
         signal: controller.signal,
       });
 
+      const rl = parseRateHeaders(res.headers);
+      if (rl) rateState.set(origin, { ...rl, updatedAtMs: Date.now() });
+
       if (res.status >= 300 && res.status < 400) {
         const location = res.headers.get('location');
         if (!location || redirects >= maxRedirects) {
-          return { ok: false, status: res.status, data: null, text: 'Too many redirects' };
+          return { ok: false, status: res.status, data: null, text: 'Too many redirects', retries };
         }
         const resolved = new URL(location, currentUrl);
         await assertSafeExternalUrl(resolved.toString());
@@ -205,10 +317,20 @@ export async function safeExternalFetch(
         continue;
       }
 
-      if ((res.status === 429 || res.status === 503) && attempt < 2) {
-        const delayMs = parseRetryAfterMs(res.headers.get('retry-after'), attempt);
-        await sleep(delayMs);
+      // GitHub signals primary/secondary limits with 403 + remaining=0 or Retry-After.
+      const limited = res.status === 429 || (res.status === 403 && (rl?.remaining === 0 || res.headers.get('retry-after') !== null));
+      if ((limited || RETRYABLE_STATUS.has(res.status)) && attempt < maxRetries) {
+        const wait = rl?.resetAtMs !== undefined ? rl.resetAtMs - Date.now() : undefined;
+        if (limited && wait !== undefined && wait > MAX_INLINE_WAIT_MS) {
+          throw new RateLimitedError(`Rate limited by ${origin}; retry after ${new Date(rl!.resetAtMs!).toISOString()}.`, rl!.resetAtMs!);
+        }
+        await res.text().catch(() => '');
+        await sleep(backoffMs(attempt, limited ? wait : undefined));
+        retries += 1;
         continue;
+      }
+      if (limited && rl?.resetAtMs && rl.resetAtMs - Date.now() > 0) {
+        throw new RateLimitedError(`Rate limited by ${origin}; retry after ${new Date(rl.resetAtMs).toISOString()}.`, rl.resetAtMs);
       }
 
       const text = await res.text();
@@ -219,15 +341,17 @@ export async function safeExternalFetch(
         parsed = text;
       }
 
-      return {
-        ok: res.ok,
-        status: res.status,
-        data: parsed,
-        text,
-      };
+      const outHeaders: Record<string, string> = {};
+      res.headers.forEach((v, k) => {
+        outHeaders[k] = v;
+      });
+
+      return { ok: res.ok, status: res.status, data: parsed, text, headers: outHeaders, rateLimit: rl, retries };
     } catch (err) {
-      if (attempt < 2) {
-        await sleep(450 * (attempt + 1));
+      if (err instanceof RateLimitedError) throw err;
+      if (attempt < maxRetries) {
+        await sleep(backoffMs(attempt));
+        retries += 1;
         continue;
       }
       throw err;
@@ -236,5 +360,5 @@ export async function safeExternalFetch(
     }
   }
 
-  return { ok: false, status: 503, data: null, text: 'External request exhausted retries' };
+  return { ok: false, status: 503, data: null, text: 'External request exhausted retries', retries };
 }

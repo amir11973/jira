@@ -66,3 +66,27 @@ the browser. The views refresh themselves when work items change (after your edi
 | Roadmap | `GET /api/planning/roadmap?projectId=` returns epics with their own dates or dates derived from child issues / sprints, progress, slipping / overdue flags, plus sprints, releases and milestones for the same timeline. |
 
 Existing databases migrate automatically (migration v3 adds the history tables; history is reconstructed on first start).
+
+## Integrations (P3)
+
+Everything below runs on the server. Connections, sync settings, links, events and conflicts are stored in SQLite
+(migration v4). A pre-P3 `.data/integration-db.json` is imported once and renamed to `*.migrated`; its saved
+credentials were encrypted with a temporary key, so those connections must be authenticated again.
+
+Only **administrators and product owners** can connect accounts, start or configure syncs, manage webhooks and
+resolve conflicts, because synced data is written with system rights.
+
+| Feature | How it works |
+| --- | --- |
+| Source control | Connect GitHub, GitHub Enterprise or GitLab with a read-only token (Integration Center > Source Control). Add repositories under a space's Development tab. Pull requests, branches, commits, deployments and vulnerability alerts are synced every 15 minutes and by webhook. A repository is synced only if its host belongs to the connected account, so a repository record cannot redirect the token. |
+| Verified dev links | Work item keys in branch names, PR titles and commit messages create links marked **verified**. A PR is *merged* when the provider says so and *deployed* when a successful production deployment contains its merge commit. Users and administrators cannot set the verification fields by hand. |
+| Delivery figures | PR cycle time, lead time, deployment frequency and security alerts on the Development tab come only from synced data (`GET /api/scm/metrics?projectId=`). `—` means there is not enough data, and repositories whose alerts cannot be read are named. |
+| Confluence-backed docs | A Confluence sync creates and updates space docs. With two-way sync, edits are pushed as a new page version. A page body containing macros, tables, links or images is **never overwritten** from JiraFlow (title changes keep the original markup). Docs are stored inside the space record, which limits a space to roughly 950 KB of document data. |
+| Jira sync | Jira issues become real work items (summary, description, status, priority, assignee, due date, labels, story points). Statuses match by your status map, then by name, then by category. With two-way sync, local edits are pushed automatically, status changes through Jira workflow transitions. Story points are pull-only. Records removed at the source are flagged, never deleted. Excel stays a direct import ("Execute import"). |
+| Conflicts | Each field is compared with the **last synced value**. Changes on one side, or to different fields, merge automatically. Both sides changing one field raises a conflict (or follows the source-wins / destination-wins policy). Resolving writes to both sides. It is refused if values changed since you looked, and stays open if the source rejects the value. "Dismiss" keeps both values and does not raise that same difference again. |
+| Webhooks | Create an endpoint under Webhooks & Events; the secret is shown once. Deliveries are verified (GitHub / Atlassian HMAC signature, GitLab secret token), de-duplicated by delivery id, processed on the durable queue with retries, listed with their result, and can be replayed. Providers need to be able to reach your server over HTTPS. |
+| Tokens, health, rate limits | OAuth 2.0 connections refresh access tokens automatically (before expiry, or once after a 401). Each connection is health-checked with history; administrators are notified when its status changes. API calls retry with backoff, honour `Retry-After` and rate-limit headers, and reschedule jobs instead of waiting out long limits. |
+
+**Test status:** these flows have been tested against local stand-ins for the GitHub, Jira, Confluence and OAuth
+APIs, not against real accounts. GitLab has not been exercised at all. Try each provider on a test project before
+turning on two-way sync with real data.
