@@ -8,41 +8,35 @@ import { User } from '../../types/jira';
 import { UserAvatar } from '../common/JiraIcons';
 
 export const LoginView: React.FC = () => {
-  const { 
-    users, login, language, toggleLanguage, 
-    theme, toggleTheme, t 
+  const {
+    authConfig, login, language, toggleLanguage,
+    theme, toggleTheme, t, showToast,
   } = useJira();
 
   const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('password123');
+  const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const signIn = async (mail: string, pass: string) => {
+    if (submitting) return;
+    setSubmitting(true);
+    setError('');
+    const result = await login(mail.trim(), pass);
+    if (!result.ok) {
+      setError(result.error || (language === 'fa' ? 'ورود ناموفق بود' : 'Sign-in failed'));
+      showToast('error', result.error || 'Sign-in failed');
+    }
+    setSubmitting(false);
+  };
 
   const handleManualLogin = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!email.trim()) {
-      setError(language === 'fa' ? 'لطفاً ایمیل را وارد نمایید' : 'Please enter an email address');
+    if (!email.trim() || !password) {
+      setError(language === 'fa' ? 'ایمیل و رمز عبور را وارد نمایید' : 'Please enter your email and password');
       return;
     }
-
-    // Find existing user by email or fallback to first
-    const match = users.find(u => u.email.toLowerCase() === email.trim().toLowerCase());
-    if (match) {
-      login(match);
-    } else {
-      // Create guest/demo session
-      login({
-        id: `user-${Date.now()}`,
-        name: email.split('@')[0],
-        nameFa: email.split('@')[0],
-        email: email.trim(),
-        avatar: email.slice(0, 2).toUpperCase(),
-        avatarColor: 'bg-indigo-600 text-white',
-        role: 'developer',
-        status: 'active',
-        department: 'Engineering',
-        joinedDate: new Date().toISOString().split('T')[0],
-      });
-    }
+    void signIn(email, password);
   };
 
   return (
@@ -86,7 +80,7 @@ export const LoginView: React.FC = () => {
       <div className="flex-1 flex items-center justify-center p-4 sm:p-8">
         <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           {/* Left Column: Direct Credentials Form (5 cols) */}
-          <div className="lg:col-span-5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6">
+          <div className={`lg:col-span-5 ${authConfig.demoMode ? '' : 'lg:col-start-4'} bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-6 sm:p-8 shadow-xl space-y-6`}>
             <div className="space-y-1">
               <h1 className="text-xl font-bold text-slate-900 dark:text-white">
                 {t.loginTitle}
@@ -117,7 +111,8 @@ export const LoginView: React.FC = () => {
                       setEmail(e.target.value);
                       setError('');
                     }}
-                    placeholder={users[0]?.email || 'parsa@nexus-tech.io'}
+                    placeholder="name@company.com"
+                    autoComplete="username"
                     className="w-full ps-9 pe-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-lg focus:outline-none focus:border-blue-500 text-slate-900 dark:text-white"
                   />
                 </div>
@@ -132,6 +127,7 @@ export const LoginView: React.FC = () => {
                   <input
                     type="password"
                     required
+                    autoComplete="current-password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     placeholder="••••••••"
@@ -142,19 +138,25 @@ export const LoginView: React.FC = () => {
 
               <button
                 type="submit"
-                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 active:scale-98"
+                disabled={submitting}
+                className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold shadow-md shadow-blue-600/20 transition-all flex items-center justify-center gap-2 active:scale-98 disabled:opacity-60 disabled:cursor-not-allowed"
               >
-                <span>{t.loginButton}</span>
+                <span>{submitting ? (language === 'fa' ? 'در حال ورود…' : 'Signing in…') : t.loginButton}</span>
                 {language === 'fa' ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
               </button>
             </form>
 
-            <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 text-center">
-              {language === 'fa' ? 'پیش‌فرض نسخه توسعه: ورود با هر رمز عبوری فعال است.' : 'Demo environment: any password will be accepted.'}
-            </div>
+            {authConfig.demoMode && (
+              <div className="pt-2 border-t border-slate-100 dark:border-slate-800 text-[11px] text-slate-400 text-center">
+                {language === 'fa'
+                  ? 'نسخه آزمایشی: رمز عبور همه کاربران نمونه «password123» است.'
+                  : 'Demo environment: every sample user uses the password "password123".'}
+              </div>
+            )}
           </div>
 
-          {/* Right Column: Quick Account Switcher (7 cols) */}
+          {/* Right Column: demo quick sign-in (only when the server runs in demo mode) */}
+          {authConfig.demoMode && (
           <div className="lg:col-span-7 space-y-4">
             <div className="space-y-1">
               <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-xs uppercase tracking-wider">
@@ -168,10 +170,11 @@ export const LoginView: React.FC = () => {
 
             {/* Grid of Team Member Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {users.map((user) => (
+              {authConfig.demoAccounts.map((account) => { const user = account as unknown as User; return (
                 <button
                   key={user.id}
-                  onClick={() => login(user)}
+                  onClick={() => void signIn(user.email, 'password123')}
+                  disabled={submitting}
                   className="flex items-center gap-3 p-3 bg-white dark:bg-slate-900 hover:bg-blue-50/60 dark:hover:bg-blue-950/40 border border-slate-200 dark:border-slate-800 hover:border-blue-300 dark:hover:border-blue-700 rounded-xl transition-all shadow-xs text-start group cursor-pointer"
                 >
                   <UserAvatar user={user} size="md" />
@@ -197,9 +200,10 @@ export const LoginView: React.FC = () => {
                     {language === 'fa' ? <ArrowLeft className="w-4 h-4" /> : <ArrowRight className="w-4 h-4" />}
                   </div>
                 </button>
-              ))}
+              ); })}
             </div>
           </div>
+          )}
         </div>
       </div>
 

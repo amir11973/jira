@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { IssueTypeIcon, UserAvatar } from '../common/JiraIcons';
+import { SyncIndicator } from './SyncIndicator';
 
 export const Header: React.FC = () => {
   const {
@@ -39,8 +40,6 @@ export const Header: React.FC = () => {
     setCurrentProjectId,
     openCreateModal,
     currentUser,
-    users,
-    login,
     logout,
     setActiveView,
     setActiveAdminTab,
@@ -336,6 +335,7 @@ export const Header: React.FC = () => {
 
         {/* Right: Notifications, Gear Admin Menu, Lang/Theme, Profile */}
         <div className="flex items-center gap-1.5 shrink-0">
+          <SyncIndicator />
           {/* Notifications Bell */}
           <div className="relative" ref={notifRef}>
             <button
@@ -367,7 +367,7 @@ export const Header: React.FC = () => {
                   )}
                 </div>
                 <div className="max-h-72 overflow-y-auto divide-y divide-slate-100 dark:divide-slate-800/70">
-                  {appNotifications.map(n => (
+                  {[...appNotifications].sort((x, y) => y.createdAt.localeCompare(x.createdAt)).map(n => (
                     <button
                       key={n.id}
                       onClick={() => {
@@ -536,35 +536,6 @@ export const Header: React.FC = () => {
                     <Users className="w-4 h-4 text-blue-600" />
                     <span>{t.userManagement}</span>
                   </button>
-                </div>
-
-                <div className="border-t border-slate-100 dark:border-slate-800/80 pt-1.5 pb-1">
-                  <div className="px-2.5 py-1 text-[10px] uppercase font-bold text-slate-400 tracking-wider">
-                    {t.switchUser}
-                  </div>
-                  <div className="max-h-36 overflow-y-auto space-y-0.5">
-                    {users
-                      .filter(u => u.id !== currentUser?.id)
-                      .slice(0, 4)
-                      .map(u => (
-                        <button
-                          key={u.id}
-                          onClick={() => {
-                            login(u);
-                            setUserDropdownOpen(false);
-                          }}
-                          className="w-full flex items-center gap-2 px-2 py-1.5 text-start hover:bg-slate-100 dark:hover:bg-slate-800 rounded-md transition-colors"
-                        >
-                          <UserAvatar user={u} size="sm" />
-                          <div className="truncate flex-1">
-                            <div className="font-medium truncate text-slate-800 dark:text-slate-200">
-                              {language === 'fa' ? u.nameFa : u.name}
-                            </div>
-                            <div className="text-[10px] text-slate-400 capitalize">{u.role.replace('_', ' ')}</div>
-                          </div>
-                        </button>
-                      ))}
-                  </div>
                 </div>
 
                 <div className="border-t border-slate-100 dark:border-slate-800/80 pt-1">

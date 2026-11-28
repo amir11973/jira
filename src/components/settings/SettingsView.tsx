@@ -86,9 +86,7 @@ export const SettingsView: React.FC = () => {
           : 'Are you sure you want to restore demo data?'
       )
     ) {
-      resetToDemoData();
-      setResetSuccess(true);
-      setTimeout(() => setResetSuccess(false), 3000);
+      void resetToDemoData();
     }
   };
 

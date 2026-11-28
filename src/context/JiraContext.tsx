@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Project,
   User,
@@ -42,27 +42,23 @@ import {
   SpaceDocPage,
   RiskItem,
   MilestoneItem,
+  RepositoryConnection,
 } from '../types/jira';
 import {
   DEFAULT_SPACE_TABS,
-  initialProjects,
-  initialUsers,
   initialStatuses,
-  initialEpics,
-  initialSprints,
-  initialVersions,
-  initialIssues,
   initialWorkflows,
-  initialAutomationRules,
   initialFormTemplates,
-  initialSavedFilters,
-  initialDashboards,
-  initialGoals,
-  initialTeams,
-  initialAssets,
-  initialNotifications,
   initialSiteConfig,
 } from '../data/mockData';
+import { ApiError, api, apiFetch as apiFetchRaw, describeApiError, onUnauthorized } from '../services/api';
+import { COLLECTIONS, SyncEngine } from '../services/syncEngine';
+import type {
+  BootstrapPayload,
+  CollectionName,
+  IssuedCredential,
+  SyncStatus,
+} from '../services/syncEngine';
 import { Language, translations } from '../utils/i18n';
 import { runTransitionPipeline } from '../utils/workflowEngine';
 
@@ -71,6 +67,56 @@ export interface ToastMessage {
   type: 'error' | 'success' | 'info';
   text: string;
 }
+
+export type AuthStatus = 'loading' | 'anonymous' | 'authenticated' | 'error';
+
+export interface DemoAccount {
+  id: string;
+  email: string;
+  role: User['role'];
+  name: string;
+  nameFa: string;
+  avatar: string;
+  avatarColor: string;
+  department?: string;
+}
+
+export interface AuthConfig {
+  demoMode: boolean;
+  demoAccounts: DemoAccount[];
+}
+
+interface BootstrapResponse {
+  user: User;
+  mustChangePassword: boolean;
+  epoch: number;
+  seq: number;
+  collections: Record<string, Array<{ id: string } & Record<string, unknown>>>;
+  versions: Record<string, Record<string, number>>;
+}
+
+function useSyncedCollection<T extends { id: string }>(
+  engine: SyncEngine,
+  name: CollectionName,
+  items: T[],
+  ready: boolean
+) {
+  useEffect(() => {
+    if (ready) engine.submit(name, items as unknown as Array<{ id: string } & Record<string, unknown>>);
+  }, [engine, name, items, ready]);
+}
+
+/** Placeholder used only before the first successful bootstrap (never rendered to the user). */
+const EMPTY_PROJECT: Project = {
+  id: '',
+  key: '...',
+  name: '',
+  nameFa: '',
+  description: '',
+  leadId: '',
+  avatarColor: 'bg-blue-600',
+  category: '',
+};
 
 const ALL_SIDEBAR_SECTIONS: GlobalSidebarItemKey[] = [
   'for_you',
@@ -94,6 +140,19 @@ interface JiraContextType {
   t: typeof translations.en;
   theme: 'light' | 'dark';
   toggleTheme: () => void;
+
+  // Server session, loading & sync state
+  authStatus: AuthStatus;
+  bootError: string | null;
+  retryBoot: () => void;
+  authConfig: AuthConfig;
+  mustChangePassword: boolean;
+  changePassword: (currentPassword: string, newPassword: string) => Promise<{ ok: boolean; error?: string }>;
+  syncStatus: SyncStatus;
+  retrySync: () => void;
+  issuedCredentials: IssuedCredential[];
+  dismissIssuedCredentials: () => void;
+  resetUserPassword: (userId: string) => Promise<IssuedCredential | null>;
 
   // Notifications / Toast
   toastMessage: ToastMessage | null;
@@ -149,10 +208,10 @@ interface JiraContextType {
   users: User[];
   currentUser: User | null;
   isAuthenticated: boolean;
-  login: (user: User) => void;
-  logout: () => void;
+  login: (email: string, password: string) => Promise<{ ok: boolean; error?: string }>;
+  logout: () => Promise<void>;
   setCurrentUser: (user: User | null) => void;
-  createUser: (user: Omit<User, 'id'>) => User;
+  createUser: (user: Omit<User, 'id'> & { password?: string }) => User;
   updateUser: (id: string, updates: Partial<User>) => void;
   deleteUser: (id: string) => void;
   toggleUserStatus: (id: string) => void;
@@ -191,11 +250,21 @@ interface JiraContextType {
     projectId?: string;
     viewers?: string;
     editors?: string;
+    viewScope?: 'private' | 'team' | 'organization';
+    editScope?: 'private' | 'team' | 'organization';
+    sharedWithUserIds?: string[];
+    editorUserIds?: string[];
   }) => DashboardConfig;
   toggleStarDashboard: (id: string) => void;
+  updateDashboard: (id: string, updates: Partial<DashboardConfig>) => void;
   createPlan: (data: { name: string; description?: string; spaceIds: string[]; isDemo?: boolean }) => PlanItem;
   createGoal: (data: Omit<GoalItem, 'id'>) => GoalItem;
   updateGoalStatus: (id: string, status: GoalItem['status']) => void;
+  updateGoal: (id: string, updates: Partial<GoalItem>) => void;
+  deleteGoal: (id: string) => void;
+  updateMilestone: (id: string, updates: Partial<MilestoneItem>) => void;
+  deleteMilestone: (id: string) => void;
+  updateVersion: (id: string, updates: Partial<Version>) => void;
   createTeam: (data: Omit<TeamEntity, 'id'>) => TeamEntity;
   createAsset: (data: Omit<AssetEntity, 'id'>) => AssetEntity;
   createRisk: (data: Omit<RiskItem, 'id' | 'createdAt' | 'updatedAt'>) => RiskItem;
@@ -261,7 +330,9 @@ interface JiraContextType {
   // Automation & Filters Actions
   toggleAutomationRule: (ruleId: string) => void;
   createAutomationRule: (rule: Omit<AutomationRule, 'id' | 'executionsCount'>) => AutomationRule;
-  saveFilter: (name: string, jql: string) => SavedFilter;
+  saveFilter: (name: string, jql: string, shareScope?: 'private' | 'team' | 'organization') => SavedFilter;
+  updateSavedFilter: (id: string, updates: Partial<SavedFilter>) => void;
+  retryAutomationRun: (logId: string) => Promise<boolean>;
   deleteSavedFilter: (id: string) => void;
 
   // Board & Filtering
@@ -290,7 +361,12 @@ interface JiraContextType {
   deleteIssue: (id: string) => void;
   cloneIssue: (id: string) => Issue | null;
   toggleArchiveIssue: (id: string) => void;
-  addIssueAttachment: (issueId: string, attachment: Omit<IssueAttachment, 'id' | 'uploadedBy' | 'uploadedAt'>) => void;
+  uploadIssueAttachment: (issueId: string, file: File) => Promise<boolean>;
+  deleteIssueAttachment: (issueId: string, attachmentId: string) => void;
+  repositories: RepositoryConnection[];
+  connectRepository: (data: Omit<RepositoryConnection, 'id' | 'connectedBy' | 'connectedAt'>) => RepositoryConnection;
+  updateRepository: (id: string, updates: Partial<RepositoryConnection>) => void;
+  disconnectRepository: (id: string) => void;
   addIssueDevLink: (issueId: string, devLink: Omit<DevLinkItem, 'id' | 'updatedAt'>) => void;
   moveIssueStatus: (id: string, newStatus: string) => { ok: boolean; error?: string };
   moveIssueSprint: (id: string, sprintId: string | null) => void;
@@ -329,7 +405,7 @@ interface JiraContextType {
   addSyncHistoryRecord: (rec: IntegrationSyncRecord) => void;
 
   // Reset
-  resetToDemoData: () => void;
+  resetToDemoData: () => Promise<void>;
 }
 
 const STORAGE_KEY_PREFIX = 'jiraflow_app_v3_';
@@ -383,18 +459,17 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const clearToast = useCallback(() => setToastMessage(null), []);
 
-  // Core Entities
-  const [projects, setProjects] = useState<Project[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}projects`, initialProjects)
-  );
+  // Core entities. The authoritative copy lives on the server (SQLite); React state is a synced cache
+  // that is hydrated after sign-in (see "Server session & synchronisation" below).
+  const [projects, setProjects] = useState<Project[]>([]);
   const [currentProjectId, setCurrentProjectIdState] = useState<string>(
-    () => localStorage.getItem(`${STORAGE_KEY_PREFIX}cur_proj`) || initialProjects[0].id
+    () => localStorage.getItem(`${STORAGE_KEY_PREFIX}cur_proj`) || ''
   );
   const [recentProjectIds, setRecentProjectIds] = useState<string[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}recent_projs`, ['proj-1', 'proj-2', 'proj-4'])
+    safeParse(`${STORAGE_KEY_PREFIX}recent_projs`, [] as string[])
   );
   const [recentIssueIds, setRecentIssueIds] = useState<string[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}recent_issues`, ['iss-402', 'iss-101', 'iss-103'])
+    safeParse(`${STORAGE_KEY_PREFIX}recent_issues`, [] as string[])
   );
   const [visibleSidebarSections, setVisibleSidebarSections] = useState<GlobalSidebarItemKey[]>(() =>
     safeParse(`${STORAGE_KEY_PREFIX}sidebar_sections`, ALL_SIDEBAR_SECTIONS)
@@ -405,23 +480,10 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRecentProjectIds(prev => [id, ...prev.filter(x => x !== id)].slice(0, 6));
   }, []);
 
-  const [users, setUsers] = useState<User[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}users`, initialUsers)
-  );
-  const [currentUser, setCurrentUser] = useState<User | null>(() => {
-    const saved = localStorage.getItem(`${STORAGE_KEY_PREFIX}current_user`);
-    if (saved !== null) {
-      try {
-        return JSON.parse(saved);
-      } catch {
-        return initialUsers[0];
-      }
-    }
-    return initialUsers[0];
-  });
+  const [users, setUsers] = useState<User[]>([]);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
 
-  // In-memory only Bearer session token (never stored in localStorage/sessionStorage)
-  const [apiSessionToken, setApiSessionToken] = useState<string | null>(null);
+  // Integration Center client-side caches (P3 moves these to the server as well)
   const [recentExcelImports, setRecentExcelImports] = useState<RecentExcelImport[]>(() =>
     safeParse(`${STORAGE_KEY_PREFIX}excel_imports`, [])
   );
@@ -432,91 +494,27 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     safeParse(`${STORAGE_KEY_PREFIX}sync_history`, [])
   );
 
-  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}workflows`, initialWorkflows)
-  );
-  const [epics, setEpics] = useState<Epic[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}epics`, initialEpics)
-  );
-  const [sprints, setSprints] = useState<Sprint[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}sprints`, initialSprints)
-  );
-  const [versions, setVersions] = useState<Version[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}versions`, initialVersions)
-  );
-  const [issues, setIssues] = useState<Issue[]>(() => {
-    const loaded = safeParse<Issue[]>(`${STORAGE_KEY_PREFIX}issues`, initialIssues);
-    return loaded.map(iss => (iss.status === 'backlog' ? { ...iss, status: 'todo' } : iss));
-  });
-  const [automationRules, setAutomationRules] = useState<AutomationRule[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}automation_rules`, initialAutomationRules)
-  );
-  const [automationAuditLogs, setAutomationAuditLogs] = useState<AutomationAuditLog[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}automation_logs`, [
-      {
-        id: 'alog-init-1',
-        projectId: 'proj-1',
-        ruleId: 'auto-2',
-        ruleName: 'Set Resolution to Done & clear Flagged on Done',
-        issueKey: 'ENG-101',
-        status: 'success',
-        details: 'Resolution set to Done; Flagged cleared.',
-        timestamp: '2026-11-08T16:00:00Z',
-      },
-      {
-        id: 'alog-init-2',
-        projectId: 'proj-1',
-        ruleId: 'auto-1',
-        ruleName: 'Auto-assign work item on In Progress',
-        issueKey: 'ENG-104',
-        status: 'success',
-        details: 'Assigned automatically on transition to In Progress.',
-        timestamp: '2026-11-09T11:30:00Z',
-      },
-    ])
-  );
-  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}saved_filters`, initialSavedFilters)
-  );
+  const [workflows, setWorkflows] = useState<WorkflowDefinition[]>([]);
+  const [epics, setEpics] = useState<Epic[]>([]);
+  const [sprints, setSprints] = useState<Sprint[]>([]);
+  const [versions, setVersions] = useState<Version[]>([]);
+  const [issues, setIssues] = useState<Issue[]>([]);
+  const [automationRules, setAutomationRules] = useState<AutomationRule[]>([]);
+  const [automationAuditLogs, setAutomationAuditLogs] = useState<AutomationAuditLog[]>([]);
+  const [savedFilters, setSavedFilters] = useState<SavedFilter[]>([]);
   const [formTemplates] = useState<FormSubmissionTemplate[]>(initialFormTemplates);
 
-  const [dashboards, setDashboards] = useState<DashboardConfig[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}dashboards`, initialDashboards)
-  );
-  const [plans, setPlans] = useState<PlanItem[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}plans`, [
-      {
-        id: 'plan-1',
-        name: 'Q4 Core & Billing Delivery Plan',
-        description: 'Unified cross-space delivery roadmap for Core Platform & Billing.',
-        spaceIds: ['proj-1', 'proj-4'],
-        ownerId: 'user-1',
-        createdAt: '2026-11-01T10:00:00Z',
-      },
-    ])
-  );
+  const [dashboards, setDashboards] = useState<DashboardConfig[]>([]);
+  const [plans, setPlans] = useState<PlanItem[]>([]);
   const [activePlanId, setActivePlanId] = useState<string | null>(null);
-  const [goals, setGoals] = useState<GoalItem[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}goals`, initialGoals)
-  );
-  const [teams, setTeams] = useState<TeamEntity[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}teams`, initialTeams)
-  );
-  const [assets, setAssets] = useState<AssetEntity[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}assets`, initialAssets)
-  );
-  const [risks, setRisks] = useState<RiskItem[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}risks`, [])
-  );
-  const [milestones, setMilestones] = useState<MilestoneItem[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}milestones`, [])
-  );
-  const [appNotifications, setAppNotifications] = useState<AppNotification[]>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}notifications`, initialNotifications)
-  );
-  const [siteConfig, setSiteConfig] = useState<SiteConfig>(() =>
-    safeParse(`${STORAGE_KEY_PREFIX}site_config`, initialSiteConfig)
-  );
+  const [goals, setGoals] = useState<GoalItem[]>([]);
+  const [teams, setTeams] = useState<TeamEntity[]>([]);
+  const [assets, setAssets] = useState<AssetEntity[]>([]);
+  const [risks, setRisks] = useState<RiskItem[]>([]);
+  const [milestones, setMilestones] = useState<MilestoneItem[]>([]);
+  const [appNotifications, setAppNotifications] = useState<AppNotification[]>([]);
+  const [repositories, setRepositories] = useState<RepositoryConnection[]>([]);
+  const [siteConfig, setSiteConfig] = useState<SiteConfig>(initialSiteConfig);
 
   // Filter & Search
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -538,7 +536,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [workflowReturnIssueId, setWorkflowReturnIssueId] = useState<string | null>(null);
   const [editingWorkflowId, setEditingWorkflowId] = useState<string | null>(null);
 
-  // Persist Preferences & Data
+  // Persist per-viewer preferences (localStorage is appropriate for these; domain data is server-backed)
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}lang`, language);
     document.documentElement.dir = language === 'fa' ? 'rtl' : 'ltr';
@@ -567,93 +565,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [recentIssueIds]);
 
   useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}plans`, JSON.stringify(plans));
-  }, [plans]);
-
-  useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}sidebar_sections`, JSON.stringify(visibleSidebarSections));
   }, [visibleSidebarSections]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}projects`, JSON.stringify(projects));
-  }, [projects]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}workflows`, JSON.stringify(workflows));
-  }, [workflows]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}issues`, JSON.stringify(issues));
-  }, [issues]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}sprints`, JSON.stringify(sprints));
-  }, [sprints]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}epics`, JSON.stringify(epics));
-  }, [epics]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}versions`, JSON.stringify(versions));
-  }, [versions]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}users`, JSON.stringify(users));
-  }, [users]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}automation_rules`, JSON.stringify(automationRules));
-  }, [automationRules]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}automation_logs`, JSON.stringify(automationAuditLogs));
-  }, [automationAuditLogs]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}saved_filters`, JSON.stringify(savedFilters));
-  }, [savedFilters]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}dashboards`, JSON.stringify(dashboards));
-  }, [dashboards]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}goals`, JSON.stringify(goals));
-  }, [goals]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}teams`, JSON.stringify(teams));
-  }, [teams]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}assets`, JSON.stringify(assets));
-  }, [assets]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}risks`, JSON.stringify(risks));
-  }, [risks]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}milestones`, JSON.stringify(milestones));
-  }, [milestones]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}notifications`, JSON.stringify(appNotifications));
-  }, [appNotifications]);
-
-  useEffect(() => {
-    localStorage.setItem(`${STORAGE_KEY_PREFIX}site_config`, JSON.stringify(siteConfig));
-  }, [siteConfig]);
-
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}current_user`, JSON.stringify(currentUser));
-    } else {
-      localStorage.setItem(`${STORAGE_KEY_PREFIX}current_user`, JSON.stringify(null));
-      setApiSessionToken(null);
-    }
-  }, [currentUser]);
 
   useEffect(() => {
     localStorage.setItem(`${STORAGE_KEY_PREFIX}excel_imports`, JSON.stringify(recentExcelImports));
@@ -667,60 +580,254 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     localStorage.setItem(`${STORAGE_KEY_PREFIX}sync_history`, JSON.stringify(syncHistory));
   }, [syncHistory]);
 
-  const fetchSessionToken = useCallback(async (usr: User): Promise<string | null> => {
+  // ===================== Server session & synchronisation =====================
+  const [authStatus, setAuthStatus] = useState<AuthStatus>('loading');
+  const [bootError, setBootError] = useState<string | null>(null);
+  const [mustChangePassword, setMustChangePassword] = useState<boolean>(false);
+  const [authConfig, setAuthConfig] = useState<AuthConfig>({ demoMode: false, demoAccounts: [] });
+  const [syncReady, setSyncReady] = useState<boolean>(false);
+  const [syncStatus, setSyncStatus] = useState<SyncStatus>({ state: 'idle', pending: 0 });
+  const [issuedCredentials, setIssuedCredentials] = useState<IssuedCredential[]>([]);
+  const toastRef = useRef(showToast);
+  toastRef.current = showToast;
+
+  const stateSetters = {
+    users: setUsers,
+    projects: setProjects,
+    workflows: setWorkflows,
+    epics: setEpics,
+    sprints: setSprints,
+    versions: setVersions,
+    issues: setIssues,
+    teams: setTeams,
+    automationRules: setAutomationRules,
+    automationLogs: setAutomationAuditLogs,
+    savedFilters: setSavedFilters,
+    dashboards: setDashboards,
+    plans: setPlans,
+    goals: setGoals,
+    assets: setAssets,
+    risks: setRisks,
+    milestones: setMilestones,
+    notifications: setAppNotifications,
+    repositories: setRepositories,
+  } as unknown as Record<
+    Exclude<CollectionName, 'siteConfig'>,
+    React.Dispatch<React.SetStateAction<Array<{ id: string }>>>
+  >;
+  const settersRef = useRef(stateSetters);
+  settersRef.current = stateSetters;
+
+  const engineRef = useRef<SyncEngine | null>(null);
+  if (!engineRef.current) {
+    engineRef.current = new SyncEngine({
+      upsert: (collection, record) => {
+        if (collection === 'siteConfig') {
+          setSiteConfig(record as unknown as SiteConfig);
+          return;
+        }
+        settersRef.current[collection](prev => {
+          const idx = prev.findIndex(x => x.id === record.id);
+          return idx >= 0 ? prev.map((x, n) => (n === idx ? record : x)) : [...prev, record];
+        });
+        if (collection === 'users') {
+          setCurrentUser(cu => (cu && cu.id === record.id ? (record as unknown as User) : cu));
+        }
+      },
+      remove: (collection, id) => {
+        if (collection === 'siteConfig') return;
+        settersRef.current[collection](prev => prev.filter(x => x.id !== id));
+      },
+      replaceAll: (collection, records) => {
+        if (collection === 'siteConfig') {
+          if (records[0]) setSiteConfig(records[0] as unknown as SiteConfig);
+          return;
+        }
+        settersRef.current[collection](() => records);
+        if (collection === 'users') {
+          setCurrentUser(cu => (cu ? (records.find(r => r.id === cu.id) as unknown as User) || cu : cu));
+        }
+      },
+      onStatus: setSyncStatus,
+      onNotice: (type, message) => toastRef.current(type, message),
+      onCredentials: creds => setIssuedCredentials(prev => [...creds, ...prev]),
+      onEpochChange: () => {
+        void loadBootstrapRef.current();
+      },
+    });
+  }
+  const engine = engineRef.current;
+
+  const resetClientState = useCallback(() => {
+    engine.stop();
+    setSyncReady(false);
+    setCurrentUser(null);
+    setMustChangePassword(false);
+    setIssuedCredentials([]);
+    setSyncStatus({ state: 'idle', pending: 0 });
+    for (const setter of Object.values(settersRef.current)) setter(() => []);
+    setSiteConfig(initialSiteConfig);
+    setSelectedIssueIdState(null);
+    setActiveView('board');
+  }, [engine]);
+
+  const loadBootstrap = useCallback(async (): Promise<boolean> => {
     try {
-      const res = await fetch('/api/auth/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: usr.id, email: usr.email, role: usr.role }),
-      });
-      if (!res.ok) return null;
-      const data = (await res.json()) as { token?: string };
-      if (data.token) {
-        setApiSessionToken(data.token);
-        return data.token;
+      const boot = await api.get<BootstrapResponse>('/api/bootstrap');
+      engine.stop();
+      setSyncReady(false);
+      for (const name of COLLECTIONS) {
+        if (name === 'siteConfig') continue;
+        settersRef.current[name](() => (boot.collections[name] as Array<{ id: string }>) || []);
       }
+      const site = boot.collections.siteConfig?.[0];
+      setSiteConfig(site ? (site as unknown as SiteConfig) : initialSiteConfig);
+      setCurrentUser(boot.user);
+      setMustChangePassword(boot.mustChangePassword);
+      setCurrentProjectIdState(prev =>
+        (boot.collections.projects as Array<{ id: string }>).some(p => p.id === prev)
+          ? prev
+          : (boot.collections.projects[0]?.id as string) || ''
+      );
+      engine.start({
+        collections: boot.collections as BootstrapPayload['collections'],
+        versions: boot.versions,
+        seq: boot.seq,
+        epoch: boot.epoch,
+      });
+      setBootError(null);
+      setAuthStatus('authenticated');
+      setSyncReady(true);
+      return true;
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) {
+        setAuthStatus('anonymous');
+      } else {
+        setBootError(describeApiError(err));
+        setAuthStatus('error');
+      }
+      return false;
+    }
+  }, [engine]);
+  const loadBootstrapRef = useRef(loadBootstrap);
+  loadBootstrapRef.current = loadBootstrap;
+
+  // First load: restore an existing server session (HttpOnly cookie) if there is one.
+  useEffect(() => {
+    void api
+      .get<AuthConfig>('/api/auth/config')
+      .then(setAuthConfig)
+      .catch(() => undefined);
+    void loadBootstrap();
+  }, [loadBootstrap]);
+
+  // Any 401 coming back from the API means the session is gone: drop to the sign-in screen.
+  useEffect(() => {
+    onUnauthorized(() => {
+      resetClientState();
+      setAuthStatus(prev => {
+        if (prev === 'authenticated') toastRef.current('error', 'Your session has expired. Please sign in again.');
+        return 'anonymous';
+      });
+    });
+    return () => onUnauthorized(null);
+  }, [resetClientState]);
+
+  // Push local changes to the server whenever a collection changes (diff based, batched, retried).
+  useSyncedCollection(engine, 'users', users, syncReady);
+  useSyncedCollection(engine, 'projects', projects, syncReady);
+  useSyncedCollection(engine, 'workflows', workflows, syncReady);
+  useSyncedCollection(engine, 'epics', epics, syncReady);
+  useSyncedCollection(engine, 'sprints', sprints, syncReady);
+  useSyncedCollection(engine, 'versions', versions, syncReady);
+  useSyncedCollection(engine, 'issues', issues, syncReady);
+  useSyncedCollection(engine, 'teams', teams, syncReady);
+  useSyncedCollection(engine, 'automationRules', automationRules, syncReady);
+  useSyncedCollection(engine, 'automationLogs', automationAuditLogs, syncReady);
+  useSyncedCollection(engine, 'savedFilters', savedFilters, syncReady);
+  useSyncedCollection(engine, 'dashboards', dashboards, syncReady);
+  useSyncedCollection(engine, 'plans', plans, syncReady);
+  useSyncedCollection(engine, 'goals', goals, syncReady);
+  useSyncedCollection(engine, 'assets', assets, syncReady);
+  useSyncedCollection(engine, 'risks', risks, syncReady);
+  useSyncedCollection(engine, 'milestones', milestones, syncReady);
+  useSyncedCollection(engine, 'notifications', appNotifications, syncReady);
+  useSyncedCollection(engine, 'repositories', repositories, syncReady);
+  const siteConfigRecords = useMemo(() => [{ ...siteConfig, id: 'site' }], [siteConfig]);
+  useSyncedCollection(engine, 'siteConfig', siteConfigRecords, syncReady);
+
+  // Warn before closing the tab while edits are still unsaved.
+  useEffect(() => {
+    const handler = (e: BeforeUnloadEvent) => {
+      if (syncStatus.pending > 0) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    };
+    window.addEventListener('beforeunload', handler);
+    return () => window.removeEventListener('beforeunload', handler);
+  }, [syncStatus.pending]);
+
+  const retrySync = useCallback(() => engine.retryNow(), [engine]);
+  const dismissIssuedCredentials = useCallback(() => setIssuedCredentials([]), []);
+
+  const login = async (email: string, password: string): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await api.post('/api/auth/login', { email, password });
+    } catch (err) {
+      return { ok: false, error: describeApiError(err) };
+    }
+    const ok = await loadBootstrap();
+    return ok ? { ok: true } : { ok: false, error: 'Signed in, but the workspace could not be loaded.' };
+  };
+
+  const logout = async (): Promise<void> => {
+    try {
+      await engine.flushNow();
     } catch {
+      // best effort: unsaved changes are reported by the beforeunload guard / status indicator
+    }
+    try {
+      await api.post('/api/auth/logout');
+    } catch {
+      // cookie is cleared server-side when reachable; always drop client state
+    }
+    resetClientState();
+    setAuthStatus('anonymous');
+  };
+
+  const changePassword = async (
+    currentPassword: string,
+    newPassword: string
+  ): Promise<{ ok: boolean; error?: string }> => {
+    try {
+      await api.post('/api/auth/change-password', { currentPassword, newPassword });
+      setMustChangePassword(false);
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: describeApiError(err) };
+    }
+  };
+
+  const resetUserPassword = async (userId: string): Promise<IssuedCredential | null> => {
+    try {
+      const res = await api.post<IssuedCredential>(`/api/users/${userId}/reset-password`);
+      setIssuedCredentials(prev => [res, ...prev]);
+      return res;
+    } catch (err) {
+      showToast('error', describeApiError(err));
       return null;
     }
-    return null;
-  }, []);
+  };
 
-  useEffect(() => {
-    if (currentUser) {
-      void fetchSessionToken(currentUser);
-    }
-  }, [currentUser, fetchSessionToken]);
-
+  // Authenticated fetch for the Integration Center and other raw API consumers.
   const apiFetch = useCallback(
-    async (url: string, init?: RequestInit): Promise<globalThis.Response> => {
-      let token = apiSessionToken;
-      if (!token && currentUser) {
-        token = await fetchSessionToken(currentUser);
-      }
-      const headers = new Headers(init?.headers || {});
-      if (token) headers.set('Authorization', `Bearer ${token}`);
-      let res = await fetch(url, { ...init, headers });
-      if (res.status === 401 && currentUser) {
-        const refreshed = await fetchSessionToken(currentUser);
-        if (refreshed) {
-          headers.set('Authorization', `Bearer ${refreshed}`);
-          res = await fetch(url, { ...init, headers });
-        }
-      }
-      return res;
-    },
-    [apiSessionToken, currentUser, fetchSessionToken]
+    (url: string, init?: RequestInit): Promise<globalThis.Response> => apiFetchRaw(url, init),
+    []
   );
 
   const toggleLanguage = () => setLanguage(prev => (prev === 'fa' ? 'en' : 'fa'));
   const toggleTheme = () => setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
-  const login = (user: User) => setCurrentUser(user);
-  const logout = () => {
-    setApiSessionToken(null);
-    setCurrentUser(null);
-  };
-
   const toggleSidebarSection = (sec: GlobalSidebarItemKey) => {
     setVisibleSidebarSections(prev =>
       prev.includes(sec) ? prev.filter(s => s !== sec) : [...prev, sec]
@@ -739,10 +846,13 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setSiteConfig(prev => ({ ...prev, ...updates }));
   };
 
-  const createUser = (data: Omit<User, 'id'>): User => {
+  const createUser = (data: Omit<User, 'id'> & { password?: string }): User => {
+    const { password, ...profile } = data;
+    const newId = `user-${Date.now()}`;
+    if (password) engine.setUserPassword(newId, password);
     const newUser: User = {
-      ...data,
-      id: `user-${Date.now()}`,
+      ...profile,
+      id: newId,
       status: data.status || 'active',
       joinedDate: data.joinedDate || new Date().toISOString().split('T')[0],
     };
@@ -782,7 +892,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const currentProject = projects.find(p => p.id === currentProjectId) || projects[0];
+  const currentProject = projects.find(p => p.id === currentProjectId) || projects[0] || EMPTY_PROJECT;
   const currentWorkflow =
     workflows.find(w => w.projectId === currentProject.id) ||
     workflows[0] || {
@@ -1006,23 +1116,36 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     projectId?: string;
     viewers?: string;
     editors?: string;
+    viewScope?: 'private' | 'team' | 'organization';
+    editScope?: 'private' | 'team' | 'organization';
+    sharedWithUserIds?: string[];
+    editorUserIds?: string[];
   }): DashboardConfig => {
+    const stamp = Date.now();
     const d: DashboardConfig = {
-      id: `dash-${Date.now()}`,
+      id: `dash-${stamp}`,
       name: data.name,
       description: data.description,
-      ownerId: currentUser?.id || 'user-1',
+      ownerId: currentUser?.id || '',
       projectId: data.projectId,
       viewers: data.viewers || 'Private',
       editors: data.editors || 'Private',
+      viewScope: data.viewScope || 'private',
+      editScope: data.editScope || 'private',
+      sharedWithUserIds: data.sharedWithUserIds || [],
+      editorUserIds: data.editorUserIds || [],
       starred: false,
       gadgets: [
-        { id: `g-${Date.now()}-1`, type: 'assigned_to_me', title: 'Assigned to Me', titleFa: 'تسک‌های من' },
-        { id: `g-${Date.now()}-2`, type: 'issue_stats', title: 'Status Breakdown', titleFa: 'آمار وضعیت‌ها' },
+        { id: `g-${stamp}-1`, type: 'assigned_to_me', title: 'Assigned to Me', titleFa: 'تسک‌های من' },
+        { id: `g-${stamp}-2`, type: 'issue_stats', title: 'Status Breakdown', titleFa: 'آمار وضعیت‌ها' },
       ],
     };
     setDashboards(prev => [d, ...prev]);
     return d;
+  };
+
+  const updateDashboard = (id: string, updates: Partial<DashboardConfig>) => {
+    setDashboards(prev => prev.map(d => (d.id === id ? { ...d, ...updates } : d)));
   };
 
   const createPlan = (data: {
@@ -1057,6 +1180,38 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateGoalStatus = (id: string, status: GoalItem['status']) => {
     setGoals(prev => prev.map(g => (g.id === id ? { ...g, status } : g)));
+  };
+
+  const updateGoal = (id: string, updates: Partial<GoalItem>) => {
+    setGoals(prev => prev.map(g => (g.id === id ? { ...g, ...updates } : g)));
+  };
+
+  const deleteGoal = (id: string) => {
+    // goals that depended on the removed goal lose that dependency
+    setGoals(prev =>
+      prev
+        .filter(g => g.id !== id)
+        .map(g => (g.dependsOnGoalIds?.includes(id) ? { ...g, dependsOnGoalIds: g.dependsOnGoalIds.filter(x => x !== id) } : g))
+    );
+  };
+
+  const updateMilestone = (id: string, updates: Partial<MilestoneItem>) => {
+    setMilestones(prev => prev.map(m => (m.id === id ? { ...m, ...updates } : m)));
+  };
+
+  const deleteMilestone = (id: string) => {
+    setMilestones(prev =>
+      prev
+        .filter(m => m.id !== id)
+        .map(m => (m.dependsOnMilestoneIds?.includes(id) ? { ...m, dependsOnMilestoneIds: m.dependsOnMilestoneIds.filter(x => x !== id) } : m))
+    );
+    setGoals(prev =>
+      prev.map(g => (g.linkedMilestoneIds?.includes(id) ? { ...g, linkedMilestoneIds: g.linkedMilestoneIds.filter(x => x !== id) } : g))
+    );
+  };
+
+  const updateVersion = (id: string, updates: Partial<Version>) => {
+    setVersions(prev => prev.map(v => (v.id === id ? { ...v, ...updates } : v)));
   };
 
   const createTeam = (data: Omit<TeamEntity, 'id'>): TeamEntity => {
@@ -1435,17 +1590,37 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return created;
   };
 
-  const saveFilter = (name: string, jql: string): SavedFilter => {
+  const saveFilter = (
+    name: string,
+    jql: string,
+    shareScope: 'private' | 'team' | 'organization' = 'private'
+  ): SavedFilter => {
     const sf: SavedFilter = {
       id: `sf-${Date.now()}`,
       name,
       jql,
-      ownerId: currentUser?.id || 'user-1',
-      shareScope: 'team',
+      ownerId: currentUser?.id || '',
+      shareScope,
       createdAt: new Date().toISOString(),
     };
     setSavedFilters(prev => [sf, ...prev]);
     return sf;
+  };
+
+  const updateSavedFilter = (id: string, updates: Partial<SavedFilter>) => {
+    setSavedFilters(prev => prev.map(f => (f.id === id ? { ...f, ...updates } : f)));
+  };
+
+  const retryAutomationRun = async (logId: string): Promise<boolean> => {
+    try {
+      await api.post(`/api/automation/logs/${logId}/retry`);
+      showToast('success', language === 'fa' ? 'اجرای اتوماسیون دوباره در صف قرار گرفت.' : 'Automation run re-queued.');
+      engine.retryNow();
+      return true;
+    } catch (err) {
+      showToast('error', describeApiError(err));
+      return false;
+    }
   };
 
   const deleteSavedFilter = (id: string) => {
@@ -1569,18 +1744,6 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
 
     setIssues(prev => [newIssue, ...prev]);
-    setAppNotifications(prev => [
-      {
-        id: `notif-${Date.now()}`,
-        title: `${issueKey} created`,
-        titleFa: `تسک جدید ${issueKey} ایجاد شد`,
-        message: newIssue.summary,
-        issueKey,
-        createdAt: new Date().toISOString(),
-        read: false,
-      },
-      ...prev,
-    ]);
     return newIssue;
   };
 
@@ -1662,23 +1825,61 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const addIssueAttachment = (
-    issueId: string,
-    attachment: Omit<IssueAttachment, 'id' | 'uploadedBy' | 'uploadedAt'>
-  ) => {
-    const att: IssueAttachment = {
-      ...attachment,
-      id: `att-${Date.now()}`,
-      uploadedBy: currentUser?.id || 'user-1',
-      uploadedAt: new Date().toISOString(),
-    };
+  const uploadIssueAttachment = async (issueId: string, file: File): Promise<boolean> => {
+    try {
+      await engine.flushNow();
+      const res = await apiFetchRaw(
+        `/api/issues/${encodeURIComponent(issueId)}/attachments?filename=${encodeURIComponent(file.name)}&type=${encodeURIComponent(file.type || 'application/octet-stream')}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file }
+      );
+      if (!res.ok) {
+        let message = `Upload failed (HTTP ${res.status}).`;
+        try {
+          message = ((await res.json()) as { error?: string }).error || message;
+        } catch {
+          // keep default message
+        }
+        showToast('error', message);
+        return false;
+      }
+      await engine.refreshRecord('issues', issueId);
+      showToast('success', language === 'fa' ? 'فایل بارگذاری شد.' : `${file.name} uploaded.`);
+      return true;
+    } catch (err) {
+      showToast('error', describeApiError(err));
+      return false;
+    }
+  };
+
+  const deleteIssueAttachment = (issueId: string, attachmentId: string) => {
     setIssues(prev =>
       prev.map(i =>
         i.id === issueId
-          ? { ...i, attachments: [...(i.attachments || []), att], updatedAt: new Date().toISOString() }
+          ? { ...i, attachments: (i.attachments || []).filter(a => a.id !== attachmentId), updatedAt: new Date().toISOString() }
           : i
       )
     );
+  };
+
+  const connectRepository = (
+    data: Omit<RepositoryConnection, 'id' | 'connectedBy' | 'connectedAt'>
+  ): RepositoryConnection => {
+    const rec: RepositoryConnection = {
+      ...data,
+      id: `repo-${Date.now()}`,
+      connectedBy: currentUser?.id,
+      connectedAt: new Date().toISOString(),
+    };
+    setRepositories(prev => [...prev, rec]);
+    return rec;
+  };
+
+  const updateRepository = (id: string, updates: Partial<RepositoryConnection>) => {
+    setRepositories(prev => prev.map(r => (r.id === id ? { ...r, ...updates } : r)));
+  };
+
+  const disconnectRepository = (id: string) => {
+    setRepositories(prev => prev.filter(r => r.id !== id));
   };
 
   const addIssueDevLink = (issueId: string, devLink: Omit<DevLinkItem, 'id' | 'updatedAt'>) => {
@@ -1737,100 +1938,9 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       details: note.message,
       timestamp: now,
     }));
-    const executedRuleIds: string[] = [];
 
-    const activeRules = automationRules.filter(r => r.projectId === issue.projectId && r.enabled);
-    for (const rule of activeRules) {
-      if (rule.trigger === 'issue_transitioned' && rule.triggerTargetStatus === newStatus) {
-        if (rule.action === 'auto_assign_mover' && !issue.assigneeId && currentUser) {
-          updates.assigneeId = currentUser.id;
-          executedRuleIds.push(rule.id);
-          const msg =
-            language === 'fa'
-              ? `تخصیص خودکار به ${currentUser.nameFa}`
-              : `Auto-assigned to ${currentUser.name}`;
-          newExecutions.push({
-            id: `exec-${Date.now()}-${rule.id}`,
-            ruleId: rule.id,
-            ruleName: language === 'fa' ? rule.nameFa : rule.name,
-            status: 'success',
-            message: msg,
-            executedAt: now,
-          });
-          newAuditLogs.push({
-            id: `alog-${Date.now()}-${rule.id}`,
-            projectId: issue.projectId,
-            ruleId: rule.id,
-            ruleName: rule.name,
-            issueKey: issue.key,
-            status: 'success',
-            details: msg,
-            timestamp: now,
-          });
-        } else if (rule.action === 'unflag_issue' && (targetStatusObj?.category === 'done' || newStatus === 'done')) {
-          updates.flagged = false;
-          if (!updates.resolution) updates.resolution = 'Done';
-          executedRuleIds.push(rule.id);
-          const msg =
-            language === 'fa'
-              ? 'نتیجه روی Done تنظیم و پرچم مانع پاک شد'
-              : 'Resolution set to Done and Flagged cleared';
-          newExecutions.push({
-            id: `exec-${Date.now()}-${rule.id}`,
-            ruleId: rule.id,
-            ruleName: language === 'fa' ? rule.nameFa : rule.name,
-            status: 'success',
-            message: msg,
-            executedAt: now,
-          });
-          newAuditLogs.push({
-            id: `alog-${Date.now()}-${rule.id}`,
-            projectId: issue.projectId,
-            ruleId: rule.id,
-            ruleName: rule.name,
-            issueKey: issue.key,
-            status: 'success',
-            details: msg,
-            timestamp: now,
-          });
-        }
-      }
-    }
-
-    if ((targetStatusObj?.category === 'done' || newStatus === 'done') && issue.epicId) {
-      const closeEpicRule = activeRules.find(r => r.action === 'close_parent');
-      if (closeEpicRule) {
-        const siblings = issues.filter(i => i.epicId === issue.epicId && i.id !== issue.id);
-        const allSiblingsDone = siblings.length === 0 || siblings.every(s => s.status === 'done');
-        if (allSiblingsDone) {
-          setEpics(prev => prev.map(e => (e.id === issue.epicId ? { ...e, status: 'done' } : e)));
-          executedRuleIds.push(closeEpicRule.id);
-          const parentEpic = epics.find(e => e.id === issue.epicId);
-          const msg =
-            language === 'fa'
-              ? `اپیک والد (${parentEpic?.key || issue.epicId}) به صورت خودکار تکمیل شد.`
-              : `Parent Epic (${parentEpic?.key || issue.epicId}) automatically marked Done.`;
-          newExecutions.push({
-            id: `exec-${Date.now()}-epic`,
-            ruleId: closeEpicRule.id,
-            ruleName: language === 'fa' ? closeEpicRule.nameFa : closeEpicRule.name,
-            status: 'success',
-            message: msg,
-            executedAt: now,
-          });
-          newAuditLogs.push({
-            id: `alog-${Date.now()}-epic`,
-            projectId: issue.projectId,
-            ruleId: closeEpicRule.id,
-            ruleName: closeEpicRule.name,
-            issueKey: issue.key,
-            status: 'success',
-            details: msg,
-            timestamp: now,
-          });
-        }
-      }
-    }
+    // Automation rules (auto-assign, roll-ups, webhooks, ...) are executed by the server job queue after
+    // this change is saved; their results arrive through the change feed.
 
     setIssues(prev =>
       prev.map(item =>
@@ -1846,10 +1956,7 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
       )
     );
 
-    if (executedRuleIds.length > 0) {
-      setAutomationRules(prev =>
-        prev.map(r => (executedRuleIds.includes(r.id) ? { ...r, executionsCount: r.executionsCount + 1 } : r))
-      );
+    if (newAuditLogs.length > 0) {
       setAutomationAuditLogs(prev => [...newAuditLogs, ...prev]);
     }
 
@@ -2113,53 +2220,23 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     );
   };
 
-  const resetToDemoData = () => {
-    setProjects(initialProjects);
-    setWorkflows(initialWorkflows);
-    setIssues(initialIssues);
-    setSprints(initialSprints);
-    setEpics(initialEpics);
-    setVersions(initialVersions);
-    setUsers(initialUsers);
-    setAutomationRules(initialAutomationRules);
-    setSavedFilters(initialSavedFilters);
-    setDashboards(initialDashboards);
-    setGoals(initialGoals);
-    setTeams(initialTeams);
-    setAssets(initialAssets);
-    setRisks([]);
-    setMilestones([]);
-    setAppNotifications(initialNotifications);
-    setSiteConfig(initialSiteConfig);
-    setVisibleSidebarSections(ALL_SIDEBAR_SECTIONS);
-    setCurrentUser(initialUsers[0]);
-    setCurrentProjectIdState(initialProjects[0].id);
-
-    const keys = [
-      'projects',
-      'workflows',
-      'issues',
-      'sprints',
-      'epics',
-      'versions',
-      'users',
-      'automation_rules',
-      'automation_logs',
-      'saved_filters',
-      'dashboards',
-      'goals',
-      'teams',
-      'assets',
-      'risks',
-      'milestones',
-      'notifications',
-      'site_config',
-      'sidebar_sections',
-      'recent_projs',
-      'current_user',
-      'cur_proj',
-    ];
-    keys.forEach(k => localStorage.removeItem(`${STORAGE_KEY_PREFIX}${k}`));
+  const resetToDemoData = async (): Promise<void> => {
+    try {
+      await engine.flushNow();
+      await api.post('/api/admin/reset-demo', { confirm: 'RESET' });
+      resetClientState();
+      setAuthStatus('anonymous');
+      localStorage.removeItem(`${STORAGE_KEY_PREFIX}cur_proj`);
+      setCurrentProjectIdState('');
+      showToast(
+        'success',
+        language === 'fa'
+          ? 'داده‌ها بازنشانی شد. لطفاً دوباره وارد شوید.'
+          : 'Workspace reset to demo data. Please sign in again.'
+      );
+    } catch (err) {
+      showToast('error', describeApiError(err));
+    }
   };
 
   const createRisk = (data: Omit<RiskItem, 'id' | 'createdAt' | 'updatedAt'>): RiskItem => {
@@ -2997,18 +3074,6 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     setCurrentProjectId(targetProj.id);
-    setAppNotifications(prev => [
-      {
-        id: `notif-imp-${Date.now()}`,
-        title: `Integration sync (${payload.source.toUpperCase()})`,
-        titleFa: `همگام‌سازی یکپارچه‌سازی (${payload.source.toUpperCase()})`,
-        message: `${createdCount} created, ${updatedCount} updated in ${targetProj.key}`,
-        createdAt: now,
-        read: false,
-      },
-      ...prev,
-    ]);
-
     return {
       targetProjectId: targetProj.id,
       targetProjectKey: targetProj.key,
@@ -3030,6 +3095,18 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         t,
         theme,
         toggleTheme,
+
+        authStatus,
+        bootError,
+        retryBoot: () => void loadBootstrap(),
+        authConfig,
+        mustChangePassword,
+        changePassword,
+        syncStatus,
+        retrySync,
+        issuedCredentials,
+        dismissIssuedCredentials,
+        resetUserPassword,
 
         toastMessage,
         showToast,
@@ -3109,9 +3186,15 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         createDashboard,
         toggleStarDashboard,
+        updateDashboard,
         createPlan,
         createGoal,
         updateGoalStatus,
+        updateGoal,
+        deleteGoal,
+        updateMilestone,
+        deleteMilestone,
+        updateVersion,
         createTeam,
         createAsset,
         createRisk,
@@ -3139,6 +3222,8 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         toggleAutomationRule,
         createAutomationRule,
         saveFilter,
+        updateSavedFilter,
+        retryAutomationRun,
         deleteSavedFilter,
 
         searchQuery,
@@ -3163,7 +3248,12 @@ export const JiraProvider: React.FC<{ children: React.ReactNode }> = ({ children
         deleteIssue,
         cloneIssue,
         toggleArchiveIssue,
-        addIssueAttachment,
+        uploadIssueAttachment,
+        deleteIssueAttachment,
+        repositories,
+        connectRepository,
+        updateRepository,
+        disconnectRepository,
         addIssueDevLink,
         moveIssueStatus,
         moveIssueSprint,

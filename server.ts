@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import crypto from 'node:crypto';
 import http from 'node:http';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -28,149 +27,26 @@ import {
   resumeSyncJob,
   retryFailedSyncJob,
 } from './server/syncWorker.ts';
+import { csrfGuard, purgeExpiredSessions, requireAdminOrOwner, requireAuth } from './server/auth.ts';
+import type { AuthenticatedRequest } from './server/auth.ts';
+import { apiErrorHandler, apiRateLimit, baseMiddleware, createDataRouter } from './server/apiRoutes.ts';
+import { migrateP1Data, migrateP2Data, seedIfEmpty } from './server/seed.ts';
+import { startJobWorker } from './server/jobs.ts';
+import './server/notify.ts';
+import './server/automation.ts';
+import { notFound } from './server/errors.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const PORT = Number(process.env.PORT || 3000);
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-
-const ALLOWED_ROLES = new Set([
-  'admin',
-  'developer',
-  'qa',
-  'product_owner',
-  'designer',
-]);
-
-interface SessionClaims {
-  userId: string;
-  organizationId: string;
-  email: string;
-  role: string;
-  exp: number;
-}
-
-interface AuthenticatedRequest extends Request {
-  authUser?: SessionClaims;
-}
-
-function signSessionToken(claims: SessionClaims): string {
-  const payload = Buffer.from(JSON.stringify(claims), 'utf8').toString('base64url');
-  const sig = crypto
-    .createHmac('sha256', SESSION_SECRET)
-    .update(payload)
-    .digest('base64url');
-  return `${payload}.${sig}`;
-}
-
-function verifySessionToken(token: string): SessionClaims | null {
-  const parts = token.split('.');
-  if (parts.length !== 2) return null;
-  const [payload, providedSig] = parts;
-  if (!payload || !providedSig) return null;
-
-  const expectedSig = crypto
-    .createHmac('sha256', SESSION_SECRET)
-    .update(payload)
-    .digest('base64url');
-
-  const a = Buffer.from(providedSig, 'utf8');
-  const b = Buffer.from(expectedSig, 'utf8');
-  if (a.length !== b.length || !crypto.timingSafeEqual(a, b)) {
-    return null;
-  }
-
-  try {
-    const parsed = JSON.parse(
-      Buffer.from(payload, 'base64url').toString('utf8')
-    ) as SessionClaims;
-    if (
-      !parsed ||
-      typeof parsed.userId !== 'string' ||
-      typeof parsed.role !== 'string' ||
-      typeof parsed.exp !== 'number' ||
-      Date.now() > parsed.exp
-    ) {
-      return null;
-    }
-    if (!parsed.organizationId) parsed.organizationId = 'org-default';
-    return parsed;
-  } catch {
-    return null;
-  }
-}
-
-function requireAuth(
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): void {
-  const authHeader = req.headers.authorization || '';
-  const match = /^Bearer\s+(.+)$/i.exec(authHeader.trim());
-  if (!match) {
-    res.status(401).json({
-      error: 'Authentication required. Missing Bearer session token.',
-      code: 'UNAUTHORIZED',
-    });
-    return;
-  }
-  const claims = verifySessionToken(match[1]);
-  if (!claims) {
-    res.status(401).json({
-      error: 'Invalid or expired session token.',
-      code: 'INVALID_SESSION',
-    });
-    return;
-  }
-  req.authUser = claims;
-  next();
-}
-
-function requireAdminOrOwner(
-  req: AuthenticatedRequest,
-  res: Response,
-  next: NextFunction
-): void {
-  const role = req.authUser?.role || '';
-  if (role !== 'admin' && role !== 'product_owner') {
-    res.status(403).json({
-      error: 'Administrator or Product Owner permission is required for this integration operation.',
-      code: 'FORBIDDEN',
-    });
-    return;
-  }
-  next();
-}
 
 function registerApiRoutes(app: express.Express) {
   app.use(express.json({ limit: '15mb' }));
 
-  // Issue a short-lived signed session token bound to the current signed-in user & organization
-  app.post('/api/auth/session', (req: Request, res: Response) => {
-    const { userId, organizationId, email, role } = (req.body || {}) as {
-      userId?: string;
-      organizationId?: string;
-      email?: string;
-      role?: string;
-    };
-
-    if (!userId || !email || !role || !ALLOWED_ROLES.has(role)) {
-      res.status(400).json({ error: 'Valid userId, email, and role are required.' });
-      return;
-    }
-
-    const exp = Date.now() + 12 * 60 * 60 * 1000;
-    const token = signSessionToken({
-      userId: String(userId).slice(0, 120),
-      organizationId: String(organizationId || 'org-default').slice(0, 80),
-      email: String(email).slice(0, 180),
-      role,
-      exp,
-    });
-
-    res.json({ token, expiresAt: exp });
-  });
+  // Authentication, sessions, data API and audit log live in server/apiRoutes.ts
+  app.use('/api', baseMiddleware, apiRateLimit(), csrfGuard);
+  app.use('/api', createDataRouter());
 
   // Integration Center full summary state
   app.get('/api/integrations/state', requireAuth, (req: AuthenticatedRequest, res: Response) => {
@@ -937,7 +813,19 @@ function registerApiRoutes(app: express.Express) {
 async function startServer() {
   const app = express();
   app.disable('x-powered-by');
+  if (process.env.TRUST_PROXY) app.set('trust proxy', process.env.TRUST_PROXY);
+
+  // Create the demo workspace on first start (no-op afterwards) before accepting traffic.
+  await seedIfEmpty();
+  await migrateP1Data();
+  migrateP2Data();
+  startJobWorker();
+  purgeExpiredSessions();
+  setInterval(purgeExpiredSessions, 60 * 60 * 1000).unref();
+
   registerApiRoutes(app);
+  app.use('/api', (_req, _res, next) => next(notFound('API endpoint not found.')));
+  app.use('/api', apiErrorHandler);
 
   // Recover any interrupted background sync jobs and start scheduled sync runner
   recoverInterruptedJobsAndStartScheduler();

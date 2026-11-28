@@ -22,18 +22,43 @@ import {
   Tag,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
-import { SpaceDocPage } from '../../types/jira';
+import { SpaceDocPage, RepositoryConnection } from '../../types/jira';
+import { buildDevLinkUrl, isValidRef, refLabel, reposForProject } from '../../utils/devLinks';
+import type { DevLinkType } from '../../utils/devLinks';
 import { formatLocalizedDateTime, formatLocalizedNumber } from '../../utils/i18n';
 import { IssueTypeIcon, UserAvatar } from '../common/JiraIcons';
 
 /* 1. Development & Delivery Metrics (P08, F31, F56) */
 export const DevelopmentView: React.FC = () => {
-  const { currentProject, issues, setSelectedIssueId, addIssueDevLink, language } = useJira();
+  const {
+    currentProject,
+    issues,
+    setSelectedIssueId,
+    addIssueDevLink,
+    repositories,
+    connectRepository,
+    updateRepository,
+    disconnectRepository,
+    currentUser,
+    showToast,
+    language,
+  } = useJira();
   const [subTab, setSubTab] = useState<'prs' | 'repos' | 'vulns' | 'deploys'>('prs');
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [targetIssueId, setTargetIssueId] = useState('');
   const [prTitle, setPrTitle] = useState('');
-  const [prRepo, setPrRepo] = useState('nexus/auth-gateway');
+  const [prRepo, setPrRepo] = useState('');
+  const [linkType, setLinkType] = useState<DevLinkType>('pr');
+  const [linkRef, setLinkRef] = useState('');
+  const [repoForm, setRepoForm] = useState({
+    name: '',
+    provider: 'github' as RepositoryConnection['provider'],
+    baseUrl: '',
+    defaultBranch: 'main',
+  });
+  const canManageRepos = currentUser?.role === 'admin' || currentUser?.role === 'product_owner';
+  const availableRepos = reposForProject(repositories, currentProject.id);
+  const activeRepo = availableRepos.find(r => r.name === prRepo) || availableRepos[0];
 
   const projIssues = issues.filter(i => i.projectId === currentProject.id && !i.archived);
   const completedCount = projIssues.filter(i => i.status === 'done').length;
@@ -49,16 +74,37 @@ export const DevelopmentView: React.FC = () => {
   const handleAddDevLink = (e: React.FormEvent) => {
     e.preventDefault();
     const issId = targetIssueId || projIssues[0]?.id;
-    if (!issId || !prTitle.trim()) return;
+    if (!issId || !activeRepo) return;
+    if (!isValidRef(linkType, linkRef)) {
+      showToast('error', language === 'fa' ? 'مقدار مرجع معتبر نیست.' : `Invalid ${refLabel(linkType).toLowerCase()}.`);
+      return;
+    }
+    const ref = linkRef.trim().replace(/^#/, '');
     addIssueDevLink(issId, {
-      type: 'pr',
-      title: prTitle.trim(),
+      type: linkType,
+      title:
+        prTitle.trim() ||
+        (linkType === 'pr' ? `PR #${ref}` : linkType === 'branch' ? ref : `Commit ${ref.slice(0, 8)}`),
       status: 'open',
-      repo: prRepo.trim() || 'nexus/core',
-      url: `https://git.nexus-tech.io/${prRepo}/pull/new`,
+      repo: activeRepo.name,
+      url: buildDevLinkUrl(activeRepo, linkType, ref),
     });
     setPrTitle('');
+    setLinkRef('');
     setIsAddOpen(false);
+  };
+
+  const handleConnectRepo = (e: React.FormEvent) => {
+    e.preventDefault();
+    connectRepository({
+      name: repoForm.name.trim(),
+      provider: repoForm.provider,
+      baseUrl: repoForm.baseUrl.trim(),
+      defaultBranch: repoForm.defaultBranch.trim() || 'main',
+      enabled: true,
+      projectIds: [],
+    });
+    setRepoForm({ name: '', provider: 'github', baseUrl: '', defaultBranch: 'main' });
   };
 
   return (
@@ -90,7 +136,7 @@ export const DevelopmentView: React.FC = () => {
       {isAddOpen && (
         <form
           onSubmit={handleAddDevLink}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end text-xs"
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-3 lg:grid-cols-6 gap-3 items-end text-xs"
         >
           <div>
             <label className="block font-semibold mb-1">{language === 'fa' ? 'تسک' : 'Work Item'}</label>
@@ -108,26 +154,59 @@ export const DevelopmentView: React.FC = () => {
           </div>
           <div>
             <label className="block font-semibold mb-1">Repository</label>
+            {availableRepos.length === 0 ? (
+              <div className="text-amber-600 py-1.5">
+                {language === 'fa' ? 'ابتدا یک مخزن متصل کنید' : 'Connect a repository first (Repositories tab)'}
+              </div>
+            ) : (
+              <select
+                value={activeRepo?.name || ''}
+                onChange={e => setPrRepo(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
+              >
+                {availableRepos.map(r => (
+                  <option key={r.id} value={r.name}>
+                    {r.name}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">{language === 'fa' ? 'نوع' : 'Type'}</label>
+            <select
+              value={linkType}
+              onChange={e => setLinkType(e.target.value as DevLinkType)}
+              className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
+            >
+              <option value="pr">Pull request</option>
+              <option value="branch">Branch</option>
+              <option value="commit">Commit</option>
+            </select>
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">{refLabel(linkType)} *</label>
             <input
               type="text"
-              value={prRepo}
-              onChange={e => setPrRepo(e.target.value)}
+              required
+              value={linkRef}
+              onChange={e => setLinkRef(e.target.value)}
+              placeholder={linkType === 'pr' ? '425' : linkType === 'branch' ? 'feature/eng-101' : 'a1b2c3d'}
               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
             />
           </div>
           <div>
-            <label className="block font-semibold mb-1">PR Title *</label>
+            <label className="block font-semibold mb-1">{language === 'fa' ? 'عنوان' : 'Title'}</label>
             <input
               type="text"
-              required
               value={prTitle}
               onChange={e => setPrTitle(e.target.value)}
-              placeholder="PR #425: Harden JWT validation"
+              placeholder="Harden JWT validation"
               className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
             />
           </div>
-          <button type="submit" className="px-4 py-1.5 bg-blue-600 text-white font-semibold rounded-md">
-            {language === 'fa' ? 'ثبت' : 'Attach PR'}
+          <button type="submit" disabled={!activeRepo} className="px-4 py-1.5 bg-blue-600 disabled:opacity-50 text-white font-semibold rounded-md">
+            {language === 'fa' ? 'ثبت' : 'Link'}
           </button>
         </form>
       )}
@@ -159,7 +238,7 @@ export const DevelopmentView: React.FC = () => {
         <div className="px-4 pt-3 border-b border-slate-200 dark:border-slate-800 flex items-center gap-5 text-xs font-semibold">
           {[
             { id: 'prs', label: `Pull requests (${allDevLinks.length})`, icon: GitPullRequest },
-            { id: 'repos', label: 'Repositories (4)', icon: FolderGit2 },
+            { id: 'repos', label: `Repositories (${repositories.length})`, icon: FolderGit2 },
             { id: 'vulns', label: 'Security alerts (1)', icon: ShieldAlert },
             { id: 'deploys', label: `Deployments (${deployments.length})`, icon: Rocket },
           ].map(tab => {
@@ -190,7 +269,20 @@ export const DevelopmentView: React.FC = () => {
                 className="p-3.5 flex items-center justify-between gap-3 hover:bg-slate-50 dark:hover:bg-slate-800/40 cursor-pointer"
               >
                 <div className="min-w-0">
-                  <div className="font-semibold text-slate-900 dark:text-white truncate">{item.title}</div>
+                  <div className="font-semibold text-slate-900 dark:text-white truncate">
+                    {item.title}
+                    {item.url && /^https?:\/\//.test(item.url) && (
+                      <a
+                        href={item.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={e => e.stopPropagation()}
+                        className="ms-2 text-[10px] font-normal text-blue-600 hover:underline"
+                      >
+                        open ↗
+                      </a>
+                    )}
+                  </div>
                   <div className="text-[11px] font-mono text-slate-400 mt-0.5">
                     {item.repo} · Linked to <span className="text-blue-600 font-bold">{item.issueKey}</span>
                   </div>
@@ -209,13 +301,91 @@ export const DevelopmentView: React.FC = () => {
               </div>
             ))}
 
-          {subTab === 'repos' &&
-            ['nexus/auth-gateway', 'nexus/api-gateway', 'nexus/streaming-engine', 'nexus/mobile-app'].map(repo => (
-              <div key={repo} className="p-3.5 flex items-center justify-between">
-                <span className="font-mono font-semibold text-slate-800 dark:text-slate-200">{repo}</span>
-                <span className="text-[11px] font-mono text-emerald-600 font-semibold">main · CI passing</span>
-              </div>
-            ))}
+          {subTab === 'repos' && (
+            <>
+              {repositories.length === 0 && (
+                <div className="p-6 text-center text-slate-400 italic">
+                  {language === 'fa' ? 'هنوز مخزنی متصل نشده است.' : 'No repositories connected yet.'}
+                </div>
+              )}
+              {repositories.map(repo => (
+                <div key={repo.id} className="p-3.5 flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-mono font-semibold text-slate-800 dark:text-slate-200">{repo.name}</div>
+                    <div className="text-[11px] text-slate-400 font-mono truncate">
+                      {repo.provider} · {repo.baseUrl} · {repo.defaultBranch || 'main'}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className={`text-[11px] font-mono font-semibold ${repo.enabled ? 'text-emerald-600' : 'text-slate-400'}`}>
+                      {repo.enabled ? 'enabled' : 'disabled'}
+                    </span>
+                    {canManageRepos && (
+                      <>
+                        <button
+                          onClick={() => updateRepository(repo.id, { enabled: !repo.enabled })}
+                          className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          {repo.enabled ? (language === 'fa' ? 'غیرفعال' : 'Disable') : language === 'fa' ? 'فعال' : 'Enable'}
+                        </button>
+                        <button
+                          onClick={() => {
+                            if (window.confirm(language === 'fa' ? 'اتصال این مخزن قطع شود؟' : `Disconnect ${repo.name}?`)) {
+                              disconnectRepository(repo.id);
+                            }
+                          }}
+                          className="px-2 py-1 rounded border border-rose-300 text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40"
+                        >
+                          {language === 'fa' ? 'قطع اتصال' : 'Disconnect'}
+                        </button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
+              {canManageRepos && (
+                <form onSubmit={handleConnectRepo} className="p-4 grid grid-cols-1 sm:grid-cols-5 gap-3 items-end bg-slate-50/60 dark:bg-slate-900/60">
+                  <div>
+                    <label className="block font-semibold mb-1">{language === 'fa' ? 'نام (org/repo)' : 'Name (org/repo)'}</label>
+                    <input
+                      required
+                      value={repoForm.name}
+                      onChange={e => setRepoForm(f => ({ ...f, name: e.target.value }))}
+                      placeholder="nexus/billing"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-semibold mb-1">Provider</label>
+                    <select
+                      value={repoForm.provider}
+                      onChange={e => setRepoForm(f => ({ ...f, provider: e.target.value as RepositoryConnection['provider'] }))}
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
+                    >
+                      <option value="github">GitHub</option>
+                      <option value="gitlab">GitLab</option>
+                      <option value="bitbucket">Bitbucket</option>
+                      <option value="generic">Generic</option>
+                    </select>
+                  </div>
+                  <div className="sm:col-span-2">
+                    <label className="block font-semibold mb-1">{language === 'fa' ? 'آدرس مخزن' : 'Repository URL'}</label>
+                    <input
+                      required
+                      type="url"
+                      value={repoForm.baseUrl}
+                      onChange={e => setRepoForm(f => ({ ...f, baseUrl: e.target.value }))}
+                      placeholder="https://github.com/nexus/billing"
+                      className="w-full px-2.5 py-1.5 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
+                    />
+                  </div>
+                  <button type="submit" className="px-4 py-1.5 bg-blue-600 text-white font-semibold rounded-md">
+                    {language === 'fa' ? 'اتصال مخزن' : 'Connect repository'}
+                  </button>
+                </form>
+              )}
+            </>
+          )}
 
           {subTab === 'vulns' && (
             <div className="p-4 flex items-center justify-between">
@@ -733,135 +903,8 @@ export const CalendarView: React.FC = () => {
   );
 };
 
-/* 4. Space Goals View (F27) */
-export const GoalsView: React.FC = () => {
-  const { currentProject, goals, createGoal, updateGoalStatus, epics, issues, users, currentUser, t, language } =
-    useJira();
-  const [title, setTitle] = useState('');
-  const [targetDate, setTargetDate] = useState('2026-12-31');
-  const [isAdding, setIsAdding] = useState(false);
-
-  const projGoals = goals.filter(g => g.projectId === currentProject.id);
-  const projEpics = epics.filter(e => e.projectId === currentProject.id);
-
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!title.trim()) return;
-    createGoal({
-      projectId: currentProject.id,
-      title: title.trim(),
-      titleFa: title.trim(),
-      ownerId: currentUser?.id || 'user-1',
-      targetDate,
-      status: 'on_track',
-      linkedEpicIds: projEpics.slice(0, 1).map(x => x.id),
-    });
-    setTitle('');
-    setIsAdding(false);
-  };
-
-  return (
-    <div className="flex-1 overflow-y-auto bg-slate-50/50 dark:bg-slate-950 p-6 space-y-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
-            <Target className="w-5 h-5 text-emerald-600" />
-            <span>{t.goalsView}</span>
-          </h1>
-          <p className="text-xs text-slate-500 mt-0.5">
-            {language === 'fa'
-              ? 'اهداف کلان و OKRهای متصل به اپیک‌های این فضا.'
-              : 'Track space OKRs and strategic objectives rolled up from linked Epics.'}
-          </p>
-        </div>
-        <button
-          onClick={() => setIsAdding(prev => !prev)}
-          className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-md text-xs font-semibold flex items-center gap-1"
-        >
-          <Plus className="w-3.5 h-3.5" />
-          <span>{language === 'fa' ? 'افزودن هدف' : 'New Goal'}</span>
-        </button>
-      </div>
-
-      {isAdding && (
-        <form
-          onSubmit={handleCreate}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 flex flex-wrap gap-3 items-end text-xs"
-        >
-          <div className="flex-1 min-w-[220px]">
-            <label className="block font-semibold mb-1">{language === 'fa' ? 'عنوان هدف' : 'Goal Title'} *</label>
-            <input
-              type="text"
-              required
-              value={title}
-              onChange={e => setTitle(e.target.value)}
-              className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
-            />
-          </div>
-          <div>
-            <label className="block font-semibold mb-1">{t.dueDate}</label>
-            <input
-              type="date"
-              value={targetDate}
-              onChange={e => setTargetDate(e.target.value)}
-              className="px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
-            />
-          </div>
-          <button type="submit" className="px-4 py-1.5 bg-emerald-600 text-white font-semibold rounded-md">
-            {t.save}
-          </button>
-        </form>
-      )}
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {projGoals.map(goal => {
-          const owner = users.find(u => u.id === goal.ownerId);
-          const linkedIssues = issues.filter(i => goal.linkedEpicIds.includes(i.epicId || ''));
-          const doneCount = linkedIssues.filter(i => i.status === 'done').length;
-          const pct = linkedIssues.length > 0 ? Math.round((doneCount / linkedIssues.length) * 100) : 0;
-
-          return (
-            <div
-              key={goal.id}
-              className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-3 text-xs"
-            >
-              <div className="flex items-start justify-between gap-2">
-                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                  {language === 'fa' ? goal.titleFa : goal.title}
-                </h3>
-                <select
-                  value={goal.status}
-                  onChange={e => updateGoalStatus(goal.id, e.target.value as any)}
-                  className="px-2 py-1 rounded bg-slate-100 dark:bg-slate-800 font-semibold text-[11px]"
-                >
-                  <option value="on_track">On Track</option>
-                  <option value="at_risk">At Risk</option>
-                  <option value="completed">Completed</option>
-                </select>
-              </div>
-              <div className="space-y-1">
-                <div className="flex justify-between text-[11px] font-mono tabular-nums">
-                  <span>{t.progress}</span>
-                  <span>{pct}%</span>
-                </div>
-                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
-                  <div className="h-full bg-emerald-500 rounded-full" style={{ width: `${pct}%` }} />
-                </div>
-              </div>
-              <div className="flex items-center justify-between text-[11px] text-slate-500 pt-2 border-t border-slate-100 dark:border-slate-800">
-                <div className="flex items-center gap-1.5">
-                  <UserAvatar user={owner} size="sm" />
-                  <span>{owner ? (language === 'fa' ? owner.nameFa : owner.name) : ''}</span>
-                </div>
-                <span className="font-mono">Target: {goal.targetDate}</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-};
+/* 4. Space Goals View lives in components/goals/GoalsView.tsx (P2: live progress, dependencies, milestones). */
+export { GoalsView } from '../goals/GoalsView';
 
 /* 5. Archived Work Items View (F09) */
 export const ArchivedWorkView: React.FC = () => {
@@ -920,25 +963,28 @@ export const ArchivedWorkView: React.FC = () => {
 
 /* 6. Space Attachments View (F09) */
 export const AttachmentsView: React.FC = () => {
-  const { currentProject, issues, users, addIssueAttachment, setSelectedIssueId, t, language } = useJira();
+  const { currentProject, issues, users, uploadIssueAttachment, setSelectedIssueId, t, language } = useJira();
   const projIssues = issues.filter(i => i.projectId === currentProject.id && !i.archived);
   const allAttachments = projIssues.flatMap(iss =>
     (iss.attachments || []).map(att => ({ ...att, issueId: iss.id, issueKey: iss.key }))
   );
 
   const [targetId, setTargetId] = useState(projIssues[0]?.id || '');
-  const [fileName, setFileName] = useState('');
+  const [pickedFile, setPickedFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = React.useRef<HTMLInputElement>(null);
 
-  const handleUpload = (e: React.FormEvent) => {
+  const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
     const issId = targetId || projIssues[0]?.id;
-    if (!issId || !fileName.trim()) return;
-    addIssueAttachment(issId, {
-      name: fileName.trim(),
-      size: '310 KB',
-      mimeType: 'application/octet-stream',
-    });
-    setFileName('');
+    if (!issId || !pickedFile) return;
+    setUploading(true);
+    const ok = await uploadIssueAttachment(issId, pickedFile);
+    setUploading(false);
+    if (ok) {
+      setPickedFile(null);
+      if (fileRef.current) fileRef.current.value = '';
+    }
   };
 
   return (
@@ -970,18 +1016,21 @@ export const AttachmentsView: React.FC = () => {
           </select>
         </div>
         <div className="flex-1 min-w-[200px]">
-          <label className="block font-semibold mb-1">{language === 'fa' ? 'نام فایل پیوست' : 'Attachment File Name'}</label>
+          <label className="block font-semibold mb-1">{language === 'fa' ? 'فایل' : 'File'}</label>
           <input
-            type="text"
+            ref={fileRef}
+            type="file"
             required
-            value={fileName}
-            onChange={e => setFileName(e.target.value)}
-            placeholder="architecture-spec-v2.pdf"
-            className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
+            onChange={e => setPickedFile(e.target.files?.[0] || null)}
+            className="w-full px-3 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
           />
         </div>
-        <button type="submit" className="px-4 py-1.5 bg-blue-600 text-white font-semibold rounded-md">
-          + {language === 'fa' ? 'افزودن پیوست' : 'Attach File'}
+        <button
+          type="submit"
+          disabled={uploading || !pickedFile}
+          className="px-4 py-1.5 bg-blue-600 disabled:opacity-60 text-white font-semibold rounded-md"
+        >
+          {uploading ? (language === 'fa' ? 'در حال بارگذاری…' : 'Uploading…') : `+ ${language === 'fa' ? 'افزودن پیوست' : 'Attach File'}`}
         </button>
       </form>
 
@@ -1000,7 +1049,15 @@ export const AttachmentsView: React.FC = () => {
               const uploader = users.find(u => u.id === att.uploadedBy);
               return (
                 <tr key={att.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40">
-                  <td className="p-3 font-mono font-semibold text-slate-800 dark:text-slate-200">{att.name}</td>
+                  <td className="p-3 font-mono font-semibold text-slate-800 dark:text-slate-200">
+                    {att.downloadUrl ? (
+                      <a href={att.downloadUrl} download={att.name} className="text-blue-600 hover:underline">
+                        {att.name}
+                      </a>
+                    ) : (
+                      att.name
+                    )}
+                  </td>
                   <td className="p-3">
                     <button
                       onClick={() => setSelectedIssueId(att.issueId)}

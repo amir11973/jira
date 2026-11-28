@@ -8,6 +8,7 @@ export const DashboardsView: React.FC = () => {
     dashboards,
     createDashboard,
     toggleStarDashboard,
+    updateDashboard,
     projects,
     issues,
     users,
@@ -25,6 +26,7 @@ export const DashboardsView: React.FC = () => {
   const [dashName, setDashName] = useState('');
   const [dashDesc, setDashDesc] = useState('');
   const [dashSpaceId, setDashSpaceId] = useState('');
+  const [shareOpen, setShareOpen] = useState(false);
 
   const filteredDashboards = dashboards.filter(d => {
     if (ownerFilter !== 'all' && d.ownerId !== ownerFilter) return false;
@@ -161,6 +163,103 @@ export const DashboardsView: React.FC = () => {
               <span>
                 Editors: <strong className="text-slate-700 dark:text-slate-300">{activeDash.editors}</strong>
               </span>
+              {(activeDash.ownerId === currentUser?.id || currentUser?.role === 'admin') && (
+                <button
+                  onClick={() => setShareOpen(o => !o)}
+                  className="px-2 py-1 rounded border border-slate-300 dark:border-slate-700 hover:bg-slate-100 dark:hover:bg-slate-800 font-semibold text-slate-700 dark:text-slate-300"
+                >
+                  {language === 'fa' ? 'اشتراک‌گذاری' : 'Share'}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeDash && shareOpen && (activeDash.ownerId === currentUser?.id || currentUser?.role === 'admin') && (
+          <div className="pt-3 border-t border-slate-100 dark:border-slate-800 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+            {(() => {
+              const labels = { private: 'Private', team: 'My teams', organization: 'My organization' } as const;
+              return (
+                <>
+                  <div className="space-y-1.5">
+                    <label className="block font-semibold">{language === 'fa' ? 'چه کسی می‌تواند ببیند' : 'Who can view'}</label>
+                    <select
+                      value={activeDash.viewScope || 'private'}
+                      onChange={e => {
+                        const v = e.target.value as 'private' | 'team' | 'organization';
+                        updateDashboard(activeDash.id, { viewScope: v, viewers: labels[v] });
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
+                    >
+                      <option value="private">Private (only me)</option>
+                      <option value="team">My teams</option>
+                      <option value="organization">Whole organization</option>
+                    </select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <label className="block font-semibold">{language === 'fa' ? 'چه کسی می‌تواند ویرایش کند' : 'Who can edit'}</label>
+                    <select
+                      value={activeDash.editScope || 'private'}
+                      onChange={e => {
+                        const v = e.target.value as 'private' | 'team' | 'organization';
+                        updateDashboard(activeDash.id, { editScope: v, editors: labels[v] });
+                      }}
+                      className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
+                    >
+                      <option value="private">Only me</option>
+                      <option value="team">My teams</option>
+                      <option value="organization">Whole organization</option>
+                    </select>
+                  </div>
+                </>
+              );
+            })()}
+            <div className="space-y-1.5">
+              <label className="block font-semibold">{language === 'fa' ? 'افراد مشخص' : 'Specific people'}</label>
+              <div className="max-h-28 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-md divide-y divide-slate-100 dark:divide-slate-800">
+                {users
+                  .filter(u => u.id !== activeDash.ownerId && (u.status || 'active') === 'active')
+                  .map(u => {
+                    const shared = (activeDash.sharedWithUserIds || []).includes(u.id);
+                    const editor = (activeDash.editorUserIds || []).includes(u.id);
+                    return (
+                      <div key={u.id} className="flex items-center justify-between px-2.5 py-1">
+                        <label className="flex items-center gap-2">
+                          <input
+                            type="checkbox"
+                            checked={shared || editor}
+                            onChange={e =>
+                              updateDashboard(activeDash.id, {
+                                sharedWithUserIds: e.target.checked
+                                  ? [...(activeDash.sharedWithUserIds || []), u.id]
+                                  : (activeDash.sharedWithUserIds || []).filter(x => x !== u.id),
+                                editorUserIds: e.target.checked
+                                  ? activeDash.editorUserIds || []
+                                  : (activeDash.editorUserIds || []).filter(x => x !== u.id),
+                              })
+                            }
+                          />
+                          <span>{language === 'fa' ? u.nameFa : u.name}</span>
+                        </label>
+                        <label className="flex items-center gap-1 text-[11px] text-slate-500">
+                          <input
+                            type="checkbox"
+                            checked={editor}
+                            onChange={e =>
+                              updateDashboard(activeDash.id, {
+                                sharedWithUserIds: Array.from(new Set([...(activeDash.sharedWithUserIds || []), u.id])),
+                                editorUserIds: e.target.checked
+                                  ? [...(activeDash.editorUserIds || []), u.id]
+                                  : (activeDash.editorUserIds || []).filter(x => x !== u.id),
+                              })
+                            }
+                          />
+                          {language === 'fa' ? 'ویرایش' : 'edit'}
+                        </label>
+                      </div>
+                    );
+                  })}
+              </div>
             </div>
           </div>
         )}

@@ -16,6 +16,8 @@ import { useJira } from '../../context/JiraContext';
 import { formatLocalizedDateOnly } from '../../utils/jalaliDate';
 import { formatLocalizedNumber } from '../../utils/i18n';
 import { IssueTypeIcon, PriorityIcon, UserAvatar } from '../common/JiraIcons';
+import { useReport } from '../../services/reports';
+import type { GoalsReport } from '../../services/reports';
 
 export const SummaryView: React.FC = () => {
   const {
@@ -35,6 +37,8 @@ export const SummaryView: React.FC = () => {
 
   const projectRisks = risks.filter(r => r.projectId === currentProject.id);
   const projectMilestones = milestones.filter(m => m.projectId === currentProject.id);
+  const { data: planning } = useReport<GoalsReport>(`/api/planning/goals?projectId=${encodeURIComponent(currentProject.id)}`, 'planning');
+  const milestoneViews = new Map((planning?.milestones || []).map(m => [m.id, m] as const));
 
   const projectIssues = issues.filter(i => i.projectId === currentProject.id && !i.archived);
 
@@ -511,8 +515,19 @@ export const SummaryView: React.FC = () => {
                       <div className="font-semibold text-slate-800 dark:text-slate-200 truncate">
                         {language === 'fa' ? m.titleFa : m.title}
                       </div>
-                      <div className="text-[10px] font-mono text-slate-400">
-                        {formatLocalizedDateOnly(m.dueDate, language)}
+                      <div className="text-[10px] font-mono text-slate-400 flex items-center gap-1.5">
+                        <span>{formatLocalizedDateOnly(m.dueDate, language)}</span>
+                        {milestoneViews.get(m.id) && (
+                          <>
+                            <span>· {milestoneViews.get(m.id)!.progress.percent}%</span>
+                            {milestoneViews.get(m.id)!.overdue && (
+                              <span className="text-rose-600 font-semibold">{language === 'fa' ? 'عقب‌افتاده' : 'overdue'}</span>
+                            )}
+                            {milestoneViews.get(m.id)!.health === 'blocked' && (
+                              <span className="text-purple-600 font-semibold">{language === 'fa' ? 'مسدود' : 'blocked'}</span>
+                            )}
+                          </>
+                        )}
                       </div>
                     </div>
                     <select
@@ -520,9 +535,11 @@ export const SummaryView: React.FC = () => {
                       onChange={e => updateMilestoneStatus(m.id, e.target.value as typeof m.status)}
                       className="px-1.5 py-0.5 text-[10px] rounded border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800"
                     >
-                      <option value="upcoming">upcoming</option>
-                      <option value="completed">completed</option>
-                      <option value="at_risk">at_risk</option>
+                      {(['planned', 'upcoming', 'on_track', 'at_risk', 'achieved', 'completed'] as const).map(s => (
+                        <option key={s} value={s}>
+                          {s}
+                        </option>
+                      ))}
                     </select>
                   </div>
                 ))

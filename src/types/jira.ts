@@ -147,6 +147,22 @@ export interface IssueAttachment {
   mimeType: string;
   uploadedBy: string;
   uploadedAt: string;
+  /** Present when a real file is stored on the server. */
+  downloadUrl?: string;
+  sizeBytes?: number;
+}
+
+export interface RepositoryConnection {
+  id: string;
+  name: string;
+  provider: 'github' | 'gitlab' | 'bitbucket' | 'generic';
+  baseUrl: string;
+  defaultBranch?: string;
+  description?: string;
+  enabled: boolean;
+  projectIds?: string[];
+  connectedBy?: string;
+  connectedAt?: string;
 }
 
 export interface DevLinkItem {
@@ -348,12 +364,17 @@ export interface MilestoneItem {
   title: string;
   titleFa?: string;
   description?: string;
+  startDate?: string;
   dueDate: string;
   status: 'planned' | 'on_track' | 'at_risk' | 'achieved' | 'upcoming' | 'completed';
   ownerId: string;
   epicId?: string;
   wbsCode?: string;
   externalId?: string;
+  linkedIssueIds?: string[];
+  dependsOnMilestoneIds?: string[];
+  /** Set by the server when the milestone is achieved / completed. */
+  completedAt?: string;
 }
 
 export interface Project {
@@ -387,7 +408,15 @@ export interface AutomationRule {
   descriptionFa: string;
   trigger: 'issue_transitioned' | 'issue_created' | 'subtasks_all_done';
   triggerTargetStatus?: string;
-  action: 'close_parent' | 'auto_assign_mover' | 'set_resolution_done' | 'unflag_issue' | 'add_watcher_lead';
+  action:
+    | 'close_parent'
+    | 'auto_assign_mover'
+    | 'set_resolution_done'
+    | 'unflag_issue'
+    | 'add_watcher_lead'
+    | 'notify_assignee'
+    | 'send_webhook';
+  actionConfig?: Record<string, string>;
   enabled: boolean;
   executionsCount: number;
 }
@@ -398,9 +427,11 @@ export interface AutomationAuditLog {
   ruleId: string;
   ruleName: string;
   issueKey: string;
-  status: 'success' | 'skipped';
+  status: 'success' | 'skipped' | 'failed' | 'retrying';
   details: string;
   timestamp: string;
+  jobId?: number;
+  attempts?: number;
 }
 
 export interface SavedFilter {
@@ -446,6 +477,10 @@ export interface DashboardConfig {
   projectId?: string;
   viewers: string;
   editors: string;
+  viewScope?: 'private' | 'team' | 'organization';
+  editScope?: 'private' | 'team' | 'organization';
+  sharedWithUserIds?: string[];
+  editorUserIds?: string[];
   starred?: boolean;
   gadgets: DashboardGadget[];
 }
@@ -456,9 +491,19 @@ export interface GoalItem {
   title: string;
   titleFa: string;
   ownerId: string;
+  description?: string;
+  startDate?: string;
   targetDate: string;
   status: 'on_track' | 'at_risk' | 'completed';
   linkedEpicIds: string[];
+  linkedIssueIds?: string[];
+  linkedMilestoneIds?: string[];
+  /** Goals that must be finished before this one can be completed. */
+  dependsOnGoalIds?: string[];
+  progressMode?: 'auto' | 'manual';
+  manualProgress?: number;
+  /** Set by the server when the goal is completed. */
+  completedAt?: string;
 }
 
 export interface TeamEntity {
@@ -483,6 +528,10 @@ export interface AssetEntity {
 
 export interface AppNotification {
   id: string;
+  userId?: string;
+  kind?: 'created' | 'assigned' | 'transitioned' | 'commented' | 'automation' | 'system';
+  issueId?: string;
+  actorId?: string;
   title: string;
   titleFa: string;
   message: string;

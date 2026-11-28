@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Zap, PlayCircle, History, BarChart2, Plus, CheckCircle2 } from 'lucide-react';
+import { Zap, PlayCircle, History, BarChart2, Plus, CheckCircle2, XCircle, RefreshCw, MinusCircle, Webhook } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 
 const AUTOMATION_TEMPLATES = [
@@ -29,6 +29,15 @@ const AUTOMATION_TEMPLATES = [
     triggerTargetStatus: 'done',
     action: 'unflag_issue' as const,
   },
+  {
+    name: 'Notify assignee when an item is Done',
+    nameFa: 'اطلاع‌رسانی به مسئول هنگام تکمیل تسک',
+    description: 'Send the assignee an in-app (and email, when configured) notification whenever their item moves to Done.',
+    descriptionFa: 'هنگام انتقال تسک به وضعیت تکمیل، یک اعلان برای مسئول آن ارسال شود.',
+    trigger: 'issue_transitioned' as const,
+    triggerTargetStatus: 'done',
+    action: 'notify_assignee' as const,
+  },
 ];
 
 export const AutomationView: React.FC = () => {
@@ -38,16 +47,49 @@ export const AutomationView: React.FC = () => {
     automationAuditLogs,
     toggleAutomationRule,
     createAutomationRule,
+    retryAutomationRun,
+    currentUser,
     showToast,
     language,
     t,
   } = useJira();
 
   const [tab, setTab] = useState<'flows' | 'templates' | 'audit' | 'usage'>('flows');
+  const [hookUrl, setHookUrl] = useState('');
+  const [hookStatus, setHookStatus] = useState('done');
+  const canManage =
+    currentUser?.role === 'admin' || currentUser?.role === 'product_owner' || currentUser?.id === currentProject.leadId;
 
   const projectRules = automationRules.filter(r => r.projectId === currentProject.id);
-  const projectLogs = automationAuditLogs.filter(l => l.projectId === currentProject.id);
+  const projectLogs = automationAuditLogs
+    .filter(l => l.projectId === currentProject.id)
+    .sort((x, y) => y.timestamp.localeCompare(x.timestamp));
   const totalExecutions = projectRules.reduce((acc, r) => acc + r.executionsCount, 0);
+
+  const handleCreateWebhook = (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      const u = new URL(hookUrl.trim());
+      if (u.protocol !== 'https:') throw new Error('https only');
+    } catch {
+      showToast('error', language === 'fa' ? 'یک آدرس https معتبر وارد کنید.' : 'Enter a valid https URL.');
+      return;
+    }
+    createAutomationRule({
+      projectId: currentProject.id,
+      name: `Send webhook when an item moves to ${hookStatus}`,
+      nameFa: `ارسال وب‌هوک هنگام انتقال به ${hookStatus}`,
+      description: `POSTs the work item as JSON to ${hookUrl.trim()} (retried automatically on failure).`,
+      descriptionFa: `ارسال اطلاعات تسک به ${hookUrl.trim()} (با تلاش مجدد خودکار).`,
+      trigger: 'issue_transitioned',
+      triggerTargetStatus: hookStatus,
+      action: 'send_webhook',
+      actionConfig: { url: hookUrl.trim() },
+      enabled: true,
+    });
+    setHookUrl('');
+    setTab('flows');
+  };
 
   const handleActivateTemplate = (tpl: (typeof AUTOMATION_TEMPLATES)[0]) => {
     createAutomationRule({
@@ -145,8 +187,10 @@ export const AutomationView: React.FC = () => {
 
                 <div className="flex items-center gap-3 shrink-0">
                   <button
+                    disabled={!canManage}
+                    title={canManage ? undefined : language === 'fa' ? 'فقط مدیر، مالک محصول یا سرپرست فضا' : 'Only admins, product owners or the space lead can change rules'}
                     onClick={() => toggleAutomationRule(rule.id)}
-                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors ${
+                    className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-colors disabled:cursor-not-allowed ${
                       rule.enabled
                         ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
                         : 'bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
@@ -181,13 +225,57 @@ export const AutomationView: React.FC = () => {
                 </p>
               </div>
               <button
+                disabled={!canManage}
                 onClick={() => handleActivateTemplate(tpl)}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold transition-colors"
+                className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-md text-xs font-semibold transition-colors"
               >
                 {language === 'fa' ? 'فعال‌سازی الگو در فضا' : 'Use Template'}
               </button>
             </div>
           ))}
+          <form
+            onSubmit={handleCreateWebhook}
+            className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-5 flex flex-col justify-between gap-3 shadow-xs"
+          >
+            <div className="space-y-2">
+              <div className="w-8 h-8 rounded-lg bg-sky-50 dark:bg-sky-950/60 text-sky-600 flex items-center justify-center">
+                <Webhook className="w-4 h-4" />
+              </div>
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                {language === 'fa' ? 'ارسال وب‌هوک' : 'Send a webhook'}
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                {language === 'fa'
+                  ? 'هنگام انتقال تسک، اطلاعات آن به یک آدرس https ارسال می‌شود. در صورت خطا چند بار دوباره تلاش می‌شود.'
+                  : 'POST the work item as JSON to an https endpoint when it reaches a status. Failures are retried with backoff.'}
+              </p>
+              <input
+                required
+                type="url"
+                value={hookUrl}
+                onChange={e => setHookUrl(e.target.value)}
+                placeholder="https://example.com/hooks/jiraflow"
+                className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono text-xs"
+              />
+              <select
+                value={hookStatus}
+                onChange={e => setHookStatus(e.target.value)}
+                className="w-full px-2.5 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md text-xs"
+              >
+                <option value="todo">To Do</option>
+                <option value="inprogress">In Progress</option>
+                <option value="review">In Review</option>
+                <option value="done">Done</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              disabled={!canManage}
+              className="w-full py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-md text-xs font-semibold transition-colors"
+            >
+              {language === 'fa' ? 'ایجاد قانون' : 'Create rule'}
+            </button>
+          </form>
         </div>
       )}
 
@@ -222,11 +310,39 @@ export const AutomationView: React.FC = () => {
                       {log.issueKey}
                     </td>
                     <td className="p-3">
-                      <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold uppercase text-[10px]">
-                        <CheckCircle2 className="w-3 h-3" /> {log.status}
-                      </span>
+                      {log.status === 'success' && (
+                        <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-semibold uppercase text-[10px]">
+                          <CheckCircle2 className="w-3 h-3" /> {log.status}
+                        </span>
+                      )}
+                      {log.status === 'skipped' && (
+                        <span className="inline-flex items-center gap-1 text-slate-500 font-semibold uppercase text-[10px]">
+                          <MinusCircle className="w-3 h-3" /> {log.status}
+                        </span>
+                      )}
+                      {log.status === 'retrying' && (
+                        <span className="inline-flex items-center gap-1 text-amber-600 font-semibold uppercase text-[10px]">
+                          <RefreshCw className="w-3 h-3 animate-spin" /> {log.status}
+                          {log.attempts ? ` (#${log.attempts})` : ''}
+                        </span>
+                      )}
+                      {log.status === 'failed' && (
+                        <span className="inline-flex items-center gap-1 text-rose-600 font-semibold uppercase text-[10px]">
+                          <XCircle className="w-3 h-3" /> {log.status}
+                        </span>
+                      )}
                     </td>
-                    <td className="p-3 text-slate-600 dark:text-slate-400">{log.details}</td>
+                    <td className="p-3 text-slate-600 dark:text-slate-400">
+                      {log.details}
+                      {log.status === 'failed' && canManage && log.jobId ? (
+                        <button
+                          onClick={() => void retryAutomationRun(log.id)}
+                          className="ms-2 px-2 py-0.5 rounded border border-slate-300 dark:border-slate-700 text-[10px] font-semibold hover:bg-slate-100 dark:hover:bg-slate-800"
+                        >
+                          {language === 'fa' ? 'تلاش مجدد' : 'Retry'}
+                        </button>
+                      ) : null}
+                    </td>
                   </tr>
                 ))
               )}

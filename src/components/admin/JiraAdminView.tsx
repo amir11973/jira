@@ -25,6 +25,7 @@ import {
   X,
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
+import { AuditLogPanel } from './AuditLogPanel';
 import { globalFieldCatalog, initialLegacyWorkflows } from '../../data/mockData';
 import { IssueTypeIcon, PriorityIcon } from '../common/JiraIcons';
 import { formatLocalizedDateTime, formatLocalizedNumber } from '../../utils/i18n';
@@ -1180,6 +1181,7 @@ export const JiraAdminView: React.FC = () => {
             <h1 className="text-xl font-bold text-slate-900 dark:text-white">
               {language === 'fa' ? 'تنظیمات عمومی سامانه و بنر اعلانات' : 'System & Announcement Banner'}
             </h1>
+            {currentUser?.role === 'admin' && <AuditLogPanel />}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="border border-slate-200 dark:border-slate-800 rounded-xl p-5 space-y-4">
                 <h3 className="text-sm font-bold text-slate-900 dark:text-white">

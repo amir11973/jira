@@ -8,3 +8,9 @@ coverage/
 !.env.example
 .data/
 
+
+# local tool scratch + databases
+.aistudio/
+*.db
+*.db-wal
+*.db-shm

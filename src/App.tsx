@@ -34,6 +34,7 @@ import { WorkflowViewerModal } from './components/workflow/WorkflowViewerModal';
 import { UsersView } from './components/users/UsersView';
 import { SettingsView } from './components/settings/SettingsView';
 import { LoginView } from './components/auth/LoginView';
+import { BootErrorScreen, BootScreen, ChangePasswordView } from './components/auth/AuthScreens';
 import { CreateIssueModal } from './components/modals/CreateIssueModal';
 import { IssueDetailModal } from './components/modals/IssueDetailModal';
 import { QuickCreateModals } from './components/modals/QuickCreateModals';
@@ -62,11 +63,12 @@ const SPACE_SCOPED_VIEWS: ViewType[] = [
 ];
 
 const MainLayout: React.FC = () => {
-  const { activeView, currentUser } = useJira();
+  const { activeView, currentUser, authStatus, mustChangePassword } = useJira();
 
-  if (!currentUser) {
-    return <LoginView />;
-  }
+  if (authStatus === 'loading') return <BootScreen />;
+  if (authStatus === 'error') return <BootErrorScreen />;
+  if (authStatus === 'anonymous' || !currentUser) return <LoginView />;
+  if (mustChangePassword) return <ChangePasswordView />;
 
   const isSpaceView = SPACE_SCOPED_VIEWS.includes(activeView);
 

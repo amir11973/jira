@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Users, UserPlus, Search, Filter, Shield, 
-  Check, X, Edit, Trash2, Power, Briefcase, Mail, UserCheck 
+  Check, X, Edit, Trash2, Power, Briefcase, Mail, UserCheck, KeyRound, Copy 
 } from 'lucide-react';
 import { useJira } from '../../context/JiraContext';
 import { User } from '../../types/jira';
@@ -10,8 +10,10 @@ import { UserAvatar } from '../common/JiraIcons';
 export const UsersView: React.FC = () => {
   const { 
     users, currentUser, createUser, updateUser, 
-    deleteUser, toggleUserStatus, issues, t, language 
+    deleteUser, toggleUserStatus, issues, t, language,
+    issuedCredentials, dismissIssuedCredentials, resetUserPassword, showToast,
   } = useJira();
+  const isAdmin = currentUser?.role === 'admin';
 
   const [searchQuery, setSearchQuery] = useState('');
   const [roleFilter, setRoleFilter] = useState<string>('all');
@@ -25,6 +27,7 @@ export const UsersView: React.FC = () => {
   const [name, setName] = useState('');
   const [nameFa, setNameFa] = useState('');
   const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [role, setRole] = useState<User['role']>('developer');
   const [department, setDepartment] = useState('Engineering');
   const [avatarColor, setAvatarColor] = useState('bg-blue-600 text-white');
@@ -43,6 +46,7 @@ export const UsersView: React.FC = () => {
     setName('');
     setNameFa('');
     setEmail('');
+    setPassword('');
     setRole('developer');
     setDepartment('Engineering');
     setAvatarColor('bg-blue-600 text-white');
@@ -66,6 +70,7 @@ export const UsersView: React.FC = () => {
         name: name.trim(),
         nameFa: nameFa.trim() || name.trim(),
         email: email.trim(),
+        password: password || undefined,
         role,
         department,
         avatar: (name.trim().slice(0, 2)).toUpperCase(),
@@ -131,14 +136,38 @@ export const UsersView: React.FC = () => {
           </p>
         </div>
 
-        <button
+        {isAdmin && (<button
           onClick={handleOpenAdd}
           className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-md text-xs font-semibold flex items-center gap-1.5 shadow-xs transition-colors self-start sm:self-auto"
         >
           <UserPlus className="w-4 h-4" />
           <span>{t.addUser}</span>
-        </button>
+        </button>)}
       </div>
+
+      {/* One-time credentials issued by the server (temporary passwords) */}
+      {issuedCredentials.length > 0 && (
+        <div className="p-4 bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-800 rounded-xl space-y-2 text-xs">
+          <div className="flex items-center justify-between">
+            <div className="font-bold text-amber-800 dark:text-amber-200 flex items-center gap-2">
+              <KeyRound className="w-4 h-4" />
+              <span>{language === 'fa' ? 'رمز عبور موقت (فقط یک‌بار نمایش داده می‌شود)' : 'Temporary passwords (shown only once)'}</span>
+            </div>
+            <button onClick={dismissIssuedCredentials} className="text-amber-700 hover:text-amber-900"><X className="w-4 h-4" /></button>
+          </div>
+          {issuedCredentials.map(c => (
+            <div key={c.userId} className="flex items-center gap-3 font-mono">
+              <span className="text-slate-700 dark:text-slate-200">{c.email}</span>
+              <code className="px-2 py-0.5 rounded bg-white dark:bg-slate-900 border border-amber-300 dark:border-amber-800 select-all">{c.temporaryPassword}</code>
+              <button
+                onClick={() => { void navigator.clipboard?.writeText(c.temporaryPassword); showToast('success', language === 'fa' ? 'کپی شد' : 'Copied'); }}
+                className="p-1 text-amber-700 hover:text-amber-900"
+              ><Copy className="w-3.5 h-3.5" /></button>
+            </div>
+          ))}
+          <p className="text-amber-700 dark:text-amber-300">{language === 'fa' ? 'کاربر باید هنگام اولین ورود رمز عبور را تغییر دهد.' : 'The user must change this password at first sign-in.'}</p>
+        </div>
+      )}
 
       {/* KPI Stats Strip */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
@@ -291,7 +320,14 @@ export const UsersView: React.FC = () => {
 
                   {/* Actions */}
                   <td className="p-3.5 text-end">
-                    <div className="flex items-center justify-end gap-1.5">
+                    {isAdmin && (<div className="flex items-center justify-end gap-1.5">
+                      <button
+                        onClick={() => void resetUserPassword(user.id)}
+                        title={language === 'fa' ? 'بازنشانی رمز عبور' : 'Reset password'}
+                        className="p-1 rounded text-slate-400 hover:text-amber-600 hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
+                      >
+                        <KeyRound className="w-3.5 h-3.5" />
+                      </button>
                       <button
                         onClick={() => toggleUserStatus(user.id)}
                         title={isActive ? 'Deactivate' : 'Activate'}
@@ -315,7 +351,7 @@ export const UsersView: React.FC = () => {
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       )}
-                    </div>
+                    </div>)}
                   </td>
                 </tr>
               );
@@ -386,6 +422,20 @@ export const UsersView: React.FC = () => {
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="john.doe@company.com"
+                  className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-slate-700 dark:text-slate-300 mb-1">
+                  {language === 'fa' ? 'رمز عبور اولیه (اختیاری)' : 'Initial password (optional)'}
+                </label>
+                <input
+                  type="password"
+                  autoComplete="new-password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={language === 'fa' ? 'خالی بگذارید تا رمز موقت ساخته شود' : 'Leave empty to generate a temporary password'}
                   className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md focus:outline-none focus:border-blue-500 font-mono"
                 />
               </div>

@@ -144,6 +144,7 @@ export const QuickCreateModals: React.FC = () => {
     setActiveQuickModal,
     projects,
     users,
+    currentUser,
     createProject,
     createPlan,
     createDashboard,
@@ -171,8 +172,10 @@ export const QuickCreateModals: React.FC = () => {
   const [dashDesc, setDashDesc] = useState('');
   const [dashViewers, setDashViewers] = useState('Private');
   const [dashEditors, setDashEditors] = useState('Private');
-  const [viewerScopeAdded, setViewerScopeAdded] = useState<string[]>(['Private']);
-  const [editorScopeAdded, setEditorScopeAdded] = useState<string[]>(['Private']);
+  const [dashViewScope, setDashViewScope] = useState<'private' | 'team' | 'organization'>('private');
+  const [dashEditScope, setDashEditScope] = useState<'private' | 'team' | 'organization'>('private');
+  const [dashSharedUsers, setDashSharedUsers] = useState<string[]>([]);
+  const [dashEditorUsers, setDashEditorUsers] = useState<string[]>([]);
 
   // Create Team State
   const [teamName, setTeamName] = useState('');
@@ -439,12 +442,21 @@ export const QuickCreateModals: React.FC = () => {
     const handleDashSubmit = (e: React.FormEvent) => {
       e.preventDefault();
       if (!dashName.trim()) return;
+      const labels = { private: 'Private', team: 'My teams', organization: 'My organization' } as const;
       createDashboard({
         name: dashName.trim(),
         description: dashDesc.trim(),
-        viewers: viewerScopeAdded.join(', '),
-        editors: editorScopeAdded.join(', '),
+        viewers: labels[dashViewScope],
+        editors: labels[dashEditScope],
+        viewScope: dashViewScope,
+        editScope: dashEditScope,
+        sharedWithUserIds: dashSharedUsers,
+        editorUserIds: dashSharedUsers.filter(id => dashEditorUsers.includes(id)),
       });
+      setDashViewScope('private');
+      setDashEditScope('private');
+      setDashSharedUsers([]);
+      setDashEditorUsers([]);
       setDashName('');
       setDashDesc('');
       closeModal();
@@ -496,81 +508,69 @@ export const QuickCreateModals: React.FC = () => {
             />
           </div>
 
-          <div className="space-y-1.5">
-            <label className="block font-semibold text-slate-800 dark:text-slate-200">
-              {language === 'fa' ? 'مشاهده‌کنندگان (Viewers)' : 'Viewers'}
-            </label>
-            <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <label className="block font-semibold text-slate-800 dark:text-slate-200">
+                {language === 'fa' ? 'مشاهده‌کنندگان (Viewers)' : 'Who can view'}
+              </label>
               <select
-                value={dashViewers}
-                onChange={e => setDashViewers(e.target.value)}
-                className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md min-w-[160px]"
+                value={dashViewScope}
+                onChange={e => setDashViewScope(e.target.value as 'private' | 'team' | 'organization')}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
               >
-                <option value="Private">Private</option>
-                <option value="My organization">My organization</option>
-                <option value="Engineering Team">Engineering Team</option>
+                <option value="private">Private (only me)</option>
+                <option value="team">My teams</option>
+                <option value="organization">Whole organization</option>
               </select>
-              <span className="text-[11px] text-slate-400 flex-1">
-                {dashViewers === 'Private' ? 'Only you' : `Shared with ${dashViewers}`}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!viewerScopeAdded.includes(dashViewers)) {
-                    setViewerScopeAdded(prev => [...prev, dashViewers]);
-                  }
-                }}
-                className="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md font-semibold"
-              >
-                Add
-              </button>
             </div>
-            <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-slate-600 dark:text-slate-300">
-              {viewerScopeAdded.map(v => (
-                <span key={v} className="inline-flex items-center gap-1">
-                  {v === 'Private' ? <Lock className="w-3 h-3" /> : <Globe className="w-3 h-3" />}
-                  {v}
-                </span>
-              ))}
+            <div className="space-y-1.5">
+              <label className="block font-semibold text-slate-800 dark:text-slate-200">
+                {language === 'fa' ? 'ویرایشگران (Editors)' : 'Who can edit'}
+              </label>
+              <select
+                value={dashEditScope}
+                onChange={e => setDashEditScope(e.target.value as 'private' | 'team' | 'organization')}
+                className="w-full px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
+              >
+                <option value="private">Only me</option>
+                <option value="team">My teams</option>
+                <option value="organization">Whole organization</option>
+              </select>
             </div>
           </div>
 
           <div className="space-y-1.5">
             <label className="block font-semibold text-slate-800 dark:text-slate-200">
-              {language === 'fa' ? 'ویرایشگران (Editors)' : 'Editors'}
+              {language === 'fa' ? 'اشتراک‌گذاری با افراد مشخص' : 'Share with specific people'}
             </label>
-            <div className="flex items-center gap-2">
-              <select
-                value={dashEditors}
-                onChange={e => setDashEditors(e.target.value)}
-                className="px-3 py-2 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md min-w-[160px]"
-              >
-                <option value="Private">Private</option>
-                <option value="Administrators">Administrators</option>
-                <option value="Space Leads">Space Leads</option>
-              </select>
-              <span className="text-[11px] text-slate-400 flex-1">
-                {dashEditors === 'Private' ? 'Only you' : `Shared with ${dashEditors}`}
-              </span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!editorScopeAdded.includes(dashEditors)) {
-                    setEditorScopeAdded(prev => [...prev, dashEditors]);
-                  }
-                }}
-                className="px-3 py-2 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-md font-semibold"
-              >
-                Add
-              </button>
-            </div>
-            <div className="flex flex-wrap gap-2 pt-1 text-[11px] text-slate-600 dark:text-slate-300">
-              {editorScopeAdded.map(ed => (
-                <span key={ed} className="inline-flex items-center gap-1">
-                  {ed === 'Private' ? <Lock className="w-3 h-3" /> : <Users className="w-3 h-3" />}
-                  {ed}
-                </span>
-              ))}
+            <div className="max-h-32 overflow-y-auto border border-slate-200 dark:border-slate-700 rounded-md divide-y divide-slate-100 dark:divide-slate-800">
+              {users
+                .filter(u => u.id !== currentUser?.id && (u.status || 'active') === 'active')
+                .map(u => (
+                  <div key={u.id} className="flex items-center justify-between px-2.5 py-1.5">
+                    <label className="flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={dashSharedUsers.includes(u.id)}
+                        onChange={e =>
+                          setDashSharedUsers(prev => (e.target.checked ? [...prev, u.id] : prev.filter(x => x !== u.id)))
+                        }
+                      />
+                      <span>{language === 'fa' ? u.nameFa : u.name}</span>
+                    </label>
+                    <label className="flex items-center gap-1 text-[11px] text-slate-500">
+                      <input
+                        type="checkbox"
+                        disabled={!dashSharedUsers.includes(u.id)}
+                        checked={dashEditorUsers.includes(u.id)}
+                        onChange={e =>
+                          setDashEditorUsers(prev => (e.target.checked ? [...prev, u.id] : prev.filter(x => x !== u.id)))
+                        }
+                      />
+                      {language === 'fa' ? 'ویرایش' : 'can edit'}
+                    </label>
+                  </div>
+                ))}
             </div>
           </div>
 

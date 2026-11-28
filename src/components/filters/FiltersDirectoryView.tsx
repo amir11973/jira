@@ -6,6 +6,7 @@ export const FiltersDirectoryView: React.FC = () => {
   const {
     savedFilters,
     saveFilter,
+    updateSavedFilter,
     deleteSavedFilter,
     users,
     currentUser,
@@ -19,6 +20,7 @@ export const FiltersDirectoryView: React.FC = () => {
   const [newName, setNewName] = useState('');
   const [newJql, setNewJql] = useState('');
   const [isCreating, setIsCreating] = useState(false);
+  const [newScope, setNewScope] = useState<'private' | 'team' | 'organization'>('private');
 
   const defaultFilters = [
     { id: 'def-1', name: t.myOpenIssues, jql: `assignee = "${currentUser?.email || 'currentUser()'}" AND status != done` },
@@ -40,7 +42,7 @@ export const FiltersDirectoryView: React.FC = () => {
   const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newName.trim() || !newJql.trim()) return;
-    saveFilter(newName.trim(), newJql.trim());
+    saveFilter(newName.trim(), newJql.trim(), newScope);
     setNewName('');
     setNewJql('');
     setIsCreating(false);
@@ -88,7 +90,7 @@ export const FiltersDirectoryView: React.FC = () => {
       {isCreating && (
         <form
           onSubmit={handleCreate}
-          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-3 gap-3 items-end text-xs"
+          className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl p-4 grid grid-cols-1 sm:grid-cols-4 gap-3 items-end text-xs"
         >
           <div>
             <label className="block font-semibold mb-1">{language === 'fa' ? 'نام فیلتر' : 'Filter Name'}</label>
@@ -111,6 +113,18 @@ export const FiltersDirectoryView: React.FC = () => {
               placeholder="priority = high AND status != done"
               className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md font-mono"
             />
+          </div>
+          <div>
+            <label className="block font-semibold mb-1">{language === 'fa' ? 'دسترسی' : 'Share with'}</label>
+            <select
+              value={newScope}
+              onChange={e => setNewScope(e.target.value as 'private' | 'team' | 'organization')}
+              className="w-full px-3 py-1.5 bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 rounded-md"
+            >
+              <option value="private">{language === 'fa' ? 'خصوصی (فقط من)' : 'Private (only me)'}</option>
+              <option value="team">{language === 'fa' ? 'تیم‌های من' : 'My teams'}</option>
+              <option value="organization">{language === 'fa' ? 'کل سازمان' : 'Whole organization'}</option>
+            </select>
           </div>
           <div className="flex gap-2">
             <button type="submit" className="px-4 py-1.5 bg-blue-600 text-white font-semibold rounded-md">
@@ -192,17 +206,31 @@ export const FiltersDirectoryView: React.FC = () => {
                   <td className="p-3 text-slate-700 dark:text-slate-300">
                     {owner ? (language === 'fa' ? owner.nameFa : owner.name) : 'Admin'}
                   </td>
-                  <td className="p-3 font-mono text-[11px] uppercase text-slate-500">
-                    {sf.shareScope || 'team'}
+                  <td className="p-3 text-[11px] text-slate-500">
+                    {sf.ownerId === currentUser?.id || currentUser?.role === 'admin' ? (
+                      <select
+                        value={sf.shareScope || 'organization'}
+                        onChange={e => updateSavedFilter(sf.id, { shareScope: e.target.value as 'private' | 'team' | 'organization' })}
+                        className="px-2 py-1 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-md"
+                      >
+                        <option value="private">Private</option>
+                        <option value="team">My teams</option>
+                        <option value="organization">Organization</option>
+                      </select>
+                    ) : (
+                      <span className="font-mono uppercase">{sf.shareScope || 'organization'}</span>
+                    )}
                   </td>
                   <td className="p-3 text-end">
-                    <button
-                      onClick={() => deleteSavedFilter(sf.id)}
-                      className="p-1 text-slate-400 hover:text-rose-600 rounded"
-                      title={t.delete}
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {(sf.ownerId === currentUser?.id || currentUser?.role === 'admin') && (
+                      <button
+                        onClick={() => deleteSavedFilter(sf.id)}
+                        className="p-1 text-slate-400 hover:text-rose-600 rounded"
+                        title={t.delete}
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               );
