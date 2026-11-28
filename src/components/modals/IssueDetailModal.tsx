@@ -1720,6 +1720,15 @@ export const IssueDetailModal: React.FC = () => {
                           )}
                           <div className="font-mono text-[10px] text-slate-400">
                             {dl.type.toUpperCase()} · {dl.status} · {dl.repo}
+                            {dl.environment ? ` · ${dl.environment}` : ''}
+                            {dl.verified && (
+                              <span
+                                className="ms-1.5 text-emerald-600 font-bold"
+                                title={language === 'fa' ? 'وضعیت توسط سرویس کنترل نسخه تأیید شده است' : 'State confirmed by the source control provider'}
+                              >
+                                ✓ {language === 'fa' ? 'تأییدشده' : 'verified'}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

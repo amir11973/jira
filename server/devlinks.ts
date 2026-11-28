@@ -73,6 +73,34 @@ export function validateDevLink(orgId: string, projectId: string, link: Rec, rep
   return null;
 }
 
+/** Fields that assert "the provider confirmed this"; only the source-control integration may write them. */
+const VERIFICATION_FIELDS = ['verified', 'externalId', 'author', 'sha', 'mergedAt', 'deployedAt', 'environment'] as const;
+
+/**
+ * For writes made by users (including administrators): verification data is carried over from the stored
+ * link and cannot be added or altered. Editing what a link points at drops its verification.
+ * Mutates `after`; returns true when something had to be corrected.
+ */
+export function enforceVerification(before: Rec[] | undefined, after: Rec[] | undefined): boolean {
+  if (!after) return false;
+  const prior = new Map((before || []).map(l => [l.id as string, l]));
+  let changed = false;
+  for (const link of after) {
+    const old = prior.get(link.id as string);
+    const sameTarget =
+      !!old && old.repo === link.repo && old.url === link.url && old.type === link.type && (old.status ?? 'open') === (link.status ?? 'open');
+    for (const f of VERIFICATION_FIELDS) {
+      const trusted = sameTarget ? old[f] : undefined;
+      if (link[f] !== trusted) {
+        changed = true;
+        if (trusted === undefined) delete link[f];
+        else link[f] = trusted;
+      }
+    }
+  }
+  return changed;
+}
+
 /**
  * Validates only the dev links that are new or changed compared with what is stored, so existing
  * links never block unrelated edits. Non-privileged users cannot claim merged/deployed states:

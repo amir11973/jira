@@ -328,7 +328,10 @@ export async function discoverConfluenceData(params: {
       }
 
       const contentRes = await safeExternalFetch(conn.serverUrl, pathUrl, headers);
-      if (!contentRes.ok || !contentRes.data || typeof contentRes.data !== 'object') break;
+      if (!contentRes.ok || !contentRes.data || typeof contentRes.data !== 'object') {
+        // a failed listing must not look like an empty space (synced pages would be reported as removed)
+        throw new Error(`Confluence page listing failed for space ${sk} (HTTP ${contentRes.status}).`);
+      }
 
       const results = (contentRes.data as {
         results?: Array<{

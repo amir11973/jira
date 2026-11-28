@@ -251,6 +251,11 @@ export async function resetToDemoWorkspace(actor: Actor, ip?: string | null): Pr
     deleteStoredFiles(stored.map(r => r.storage_key));
     db.exec(`
       DELETE FROM jobs;
+      -- synced data refers to records that are about to be replaced (connections and settings are kept)
+      DELETE FROM integ_links;
+      DELETE FROM integ_events;
+      DELETE FROM scm_items;
+      DELETE FROM integ_docs WHERE kind IN ('job', 'jobitem', 'conflict', 'reposync', 'history');
       DELETE FROM issue_comments;
       DELETE FROM issue_worklogs;
       DELETE FROM issue_attachments;

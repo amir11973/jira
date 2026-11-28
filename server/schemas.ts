@@ -304,10 +304,18 @@ export const RECORD_SCHEMAS: Record<CollectionName, Spec> = {
         id: S.str({ req: true, max: 120 }),
         type: S.oneOf(['pr', 'branch', 'commit'], { req: true }),
         title: SHORT,
-        status: S.oneOf(['open', 'merged', 'deployed']),
+        status: S.oneOf(['open', 'merged', 'deployed', 'closed']),
         repo: SHORT,
         url: S.str({ max: 2000 }),
         updatedAt: D,
+        // Written only by the source-control integration (server/scm.ts):
+        verified: S.bool(),
+        externalId: S.str({ max: 400 }),
+        author: S.str({ max: 200 }),
+        sha: S.str({ max: 64 }),
+        mergedAt: D,
+        deployedAt: D,
+        environment: S.str({ max: 120 }),
       })
     ),
     history: S.arr(

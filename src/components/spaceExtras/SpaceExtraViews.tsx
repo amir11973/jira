@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Code2,
   GitPullRequest,
@@ -27,6 +27,26 @@ import { buildDevLinkUrl, isValidRef, refLabel, reposForProject } from '../../ut
 import type { DevLinkType } from '../../utils/devLinks';
 import { formatLocalizedDateTime, formatLocalizedNumber } from '../../utils/i18n';
 import { IssueTypeIcon, UserAvatar } from '../common/JiraIcons';
+import { api } from '../../services/api';
+
+interface DeliveryMetrics {
+  syncedRepositories: number;
+  cycleTimeHours: number | null;
+  leadTimeHours: number | null;
+  deploymentsPerWeek: number | null;
+  vulnerabilities: Array<{
+    id: string;
+    repo: string;
+    severity: string;
+    package: string;
+    summary: string;
+    cve?: string;
+    advisoryId?: string;
+    url?: string;
+    patchedVersion?: string;
+  }> | null;
+  alertsUnavailable: string[];
+}
 
 /* 1. Development & Delivery Metrics (P08, F31, F56) */
 export const DevelopmentView: React.FC = () => {
@@ -70,6 +90,28 @@ export const DevelopmentView: React.FC = () => {
 
   const openPrs = allDevLinks.filter(d => d.type === 'pr' && d.status === 'open');
   const deployments = allDevLinks.filter(d => d.status === 'deployed');
+
+  // Delivery figures and security alerts come only from data synced from GitHub / GitLab.
+  const [delivery, setDelivery] = useState<DeliveryMetrics | null>(null);
+  const projectId = currentProject.id;
+  useEffect(() => {
+    let live = true;
+    setDelivery(null);
+    const load = () =>
+      api
+        .get<DeliveryMetrics>(`/api/scm/metrics?projectId=${encodeURIComponent(projectId)}`)
+        .then(d => live && setDelivery(d))
+        .catch(() => null);
+    void load();
+    const timer = setInterval(load, 15000);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [projectId]);
+  const duration = (hours: number | null | undefined) =>
+    hours === null || hours === undefined ? '—' : hours < 48 ? `${Math.round(hours * 10) / 10}h` : `${Math.round((hours / 24) * 10) / 10}d`;
+  const alerts = delivery?.vulnerabilities || [];
 
   const handleAddDevLink = (e: React.FormEvent) => {
     e.preventDefault();
@@ -215,9 +257,12 @@ export const DevelopmentView: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
         {[
           { label: language === 'fa' ? 'تکمیل‌شده' : 'Items completed', value: String(completedCount) },
-          { label: language === 'fa' ? 'زمان چرخه PR' : 'PR cycle time', value: '14.2h' },
-          { label: language === 'fa' ? 'زمان تحویل تغییر' : 'Lead time', value: '2.1d' },
-          { label: language === 'fa' ? 'نرخ استقرار' : 'Deploy freq', value: `${deployments.length + 3}/wk` },
+          { label: language === 'fa' ? 'زمان چرخه PR' : 'PR cycle time', value: duration(delivery?.cycleTimeHours) },
+          { label: language === 'fa' ? 'زمان تحویل تغییر' : 'Lead time', value: duration(delivery?.leadTimeHours) },
+          {
+            label: language === 'fa' ? 'نرخ استقرار' : 'Deploy freq',
+            value: delivery?.deploymentsPerWeek === null || delivery?.deploymentsPerWeek === undefined ? '—' : `${delivery.deploymentsPerWeek}/wk`,
+          },
           { label: language === 'fa' ? 'باگ‌های باز' : 'Bugs tracked', value: String(bugsCount) },
           { label: language === 'fa' ? 'PRهای باز' : 'Open PRs', value: String(openPrs.length) },
         ].map((m, idx) => (
@@ -239,7 +284,7 @@ export const DevelopmentView: React.FC = () => {
           {[
             { id: 'prs', label: `Pull requests (${allDevLinks.length})`, icon: GitPullRequest },
             { id: 'repos', label: `Repositories (${repositories.length})`, icon: FolderGit2 },
-            { id: 'vulns', label: 'Security alerts (1)', icon: ShieldAlert },
+            { id: 'vulns', label: delivery?.syncedRepositories ? `Security alerts (${alerts.length})` : 'Security alerts', icon: ShieldAlert },
             { id: 'deploys', label: `Deployments (${deployments.length})`, icon: Rocket },
           ].map(tab => {
             const Icon = tab.icon;
@@ -285,6 +330,7 @@ export const DevelopmentView: React.FC = () => {
                   </div>
                   <div className="text-[11px] font-mono text-slate-400 mt-0.5">
                     {item.repo} · Linked to <span className="text-blue-600 font-bold">{item.issueKey}</span>
+                    {item.verified && <span className="ms-1.5 text-emerald-600 font-bold">✓ verified</span>}
                   </div>
                 </div>
                 <span
@@ -388,13 +434,56 @@ export const DevelopmentView: React.FC = () => {
           )}
 
           {subTab === 'vulns' && (
-            <div className="p-4 flex items-center justify-between">
-              <div>
-                <div className="font-bold text-amber-600">CVE-2026-4410 · Reverse Proxy Idle Timeout Misconfiguration</div>
-                <div className="text-[11px] text-slate-500 mt-0.5">Tracked under ENG-103 · Severity: Medium</div>
-              </div>
-              <span className="font-mono text-[11px] font-bold text-amber-600">OPEN</span>
-            </div>
+            <>
+              {!!delivery?.alertsUnavailable.length && (
+                <div className="p-3.5 text-amber-700 dark:text-amber-300">
+                  {language === 'fa' ? 'هشدارهای این مخازن قابل خواندن نیست:' : 'Alerts cannot be read for:'} {delivery.alertsUnavailable.join(', ')}.{' '}
+                  {language === 'fa' ? 'نبود هشدار به معنی امن بودن نیست.' : 'An empty list does not mean they are safe.'}
+                </div>
+              )}
+              {alerts.length === 0 ? (
+                <div className="p-6 text-center text-slate-400 italic">
+                  {delivery?.vulnerabilities === null
+                    ? language === 'fa'
+                      ? 'هشدارهای امنیتی برای نقش شما نمایش داده نمی‌شود.'
+                      : 'Security alerts are not shown to your role.'
+                    : delivery?.syncedRepositories
+                    ? language === 'fa'
+                      ? 'هشدار بازی در داده‌های همگام‌شده نیست.'
+                      : 'No open alerts in the synced data.'
+                    : language === 'fa'
+                    ? 'برای دیدن هشدارها GitHub یا GitLab را در مرکز یکپارچه‌سازی متصل کنید.'
+                    : 'Connect GitHub or GitLab in the Integration Center to see security alerts.'}
+                </div>
+              ) : (
+                alerts.map(v => (
+                  <div key={`${v.repo}-${v.id}`} className="p-3.5 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="font-bold text-slate-900 dark:text-white">
+                        {v.cve || v.advisoryId ? `${v.cve || v.advisoryId} · ` : ''}
+                        {v.summary}
+                        {v.url && /^https?:\/\//.test(v.url) && (
+                          <a href={v.url} target="_blank" rel="noopener noreferrer" className="ms-2 text-[10px] font-normal text-blue-600 hover:underline">
+                            open ↗
+                          </a>
+                        )}
+                      </div>
+                      <div className="text-[11px] font-mono text-slate-400 mt-0.5">
+                        {v.repo} · {v.package}
+                        {v.patchedVersion ? ` · fixed in ${v.patchedVersion}` : ''}
+                      </div>
+                    </div>
+                    <span
+                      className={`font-mono text-[11px] uppercase font-bold ${
+                        v.severity === 'critical' || v.severity === 'high' ? 'text-rose-600' : 'text-amber-600'
+                      }`}
+                    >
+                      {v.severity}
+                    </span>
+                  </div>
+                ))
+              )}
+            </>
           )}
         </div>
       </div>
